@@ -22,13 +22,8 @@
     {
       "binding": "DB",
       "database_name": "doc-library",
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations",
-    },
-    {
-      "binding": "doc_library",
-      "database_name": "doc-library",
       "database_id": "3f6350fe-7ed5-4b5c-baaf-fad9e47e1571",
+      "migrations_dir": "migrations",
     },
   ],
   "vectorize": [

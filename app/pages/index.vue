@@ -1,6 +1,7 @@
 <script setup lang="ts">
 interface Health {
   ok: boolean
+  auth?: 'open' | 'password' | 'none'
   embeddingModel: string
   dimensions: number
   vectorBackend: 'd1' | 'vectorize'
@@ -33,8 +34,11 @@ interface DocumentDetail {
   chunks: Array<{ id: string, chunkIndex: number, content: string }>
 }
 
+const requestHeaders = useRequestHeaders(['cookie'])
 const { data: health } = await useFetch<Health>('/api/health')
-const { data: library, refresh: refreshLibrary } = await useFetch<{ documents: LibraryDocument[] }>('/api/documents')
+const { data: library, refresh: refreshLibrary } = await useFetch<{ documents: LibraryDocument[] }>('/api/documents', {
+  headers: requestHeaders
+})
 
 const title = ref('')
 const body = ref('')
@@ -164,9 +168,13 @@ function formatScore (score: number) {
       </p>
     </header>
 
-    <p class="banner">
-      <strong>Internal only.</strong>
-      Hackathon v1 has no authentication. Do not put this URL on the public internet without Cloudflare Access or another gate. Embeddings are created only when someone uploads a document.
+    <p v-if="health?.auth === 'password'" class="banner">
+      <strong>Shared password.</strong>
+      This browser is unlocked. Upload and search still require the <code>site_auth</code> cookie. API clients send <code>Authorization: Bearer</code> or <code>X-Site-Password</code>. Cloudflare Access can replace this gate later.
+    </p>
+    <p v-else class="banner">
+      <strong>Unlocked.</strong>
+      <code>SITE_PASSWORD</code> is empty, so anyone who can open this URL can upload and search. Set the Worker secret before sharing it. Embeddings run only when someone saves a document.
     </p>
 
     <p v-if="health?.vectorBackend === 'd1'" class="banner">

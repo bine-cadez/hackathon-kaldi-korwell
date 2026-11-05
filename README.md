@@ -4,7 +4,7 @@ Hackathon v1 of an internal document library. Someone pastes or uploads a text o
 
 Chat is not in this version. Nothing is embedded until a person uploads it.
 
-This build has **no authentication**. `public/robots.txt` disallows every crawler, and every response sends `X-Robots-Tag: noindex, nofollow`. That only asks crawlers to stay away. Production should sit behind [Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/) before anyone shares the URL. A `workers.dev` hostname is public until Access is on.
+A shared password (`SITE_PASSWORD`) locks HTML pages and the data APIs when it is set. Leave it unset and the app stays open, which is the local/dev default. `GET /api/health` stays public either way. `public/robots.txt` disallows every crawler, and every response sends `X-Robots-Tag: noindex, nofollow`. [Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/) can replace this gate later. This repo does not enable Access. A `workers.dev` hostname is reachable until one of those gates is on.
 
 ## Stack
 
@@ -55,10 +55,28 @@ npm test
 | Name                 | Where                                                                                                              |
 | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `OPENROUTER_API_KEY` | `.env` for `npm run dev`. `.dev.vars` for `wrangler dev`. Production: `npx wrangler secret put OPENROUTER_API_KEY` |
+| `SITE_PASSWORD`      | Optional. Empty = unlocked. Same files for local. Production: `npx wrangler secret put SITE_PASSWORD`             |
 
 Do not commit the key. Do not put it in `wrangler.jsonc`. Placeholders only live in `.env.example` and `.dev.vars.example`.
 
 `NUXT_OPENROUTER_API_KEY` is also read if you set it, but the Worker secret should be named `OPENROUTER_API_KEY`.
+
+## Shared password
+
+Do not commit the password. Do not put it in `wrangler.jsonc` or in GitHub Actions secrets. The deploy workflow does not upload it, and `--keep-vars` leaves an existing Worker secret in place.
+
+| `SITE_PASSWORD` | Behavior |
+| --------------- | -------- |
+| Unset or empty  | Unlocked. This is the local/dev default. |
+| Set             | HTML pages, `POST /api/documents`, `POST /api/search`, and the other document list/get/delete routes return **401** until the caller unlocks. `GET /api/health` stays public and reports `auth: "password"` or `auth: "open"`. |
+
+The browser shows a password form on the first visit. A correct password sets an HttpOnly `site_auth` cookie (30 days). API clients send the same password as `Authorization: Bearer <password>` or `X-Site-Password: <password>`.
+
+```bash
+npx wrangler secret put SITE_PASSWORD
+```
+
+For `npm run dev`, set `SITE_PASSWORD` in `.env`. For `npm run preview`, set it in `.dev.vars`. Cloudflare Access can replace this in-app gate once Zero Trust is enabled on the account.
 
 ## Create D1, Vectorize,
 
@@ -89,7 +107,7 @@ npm run db:migrate:remote
 
 ## Cloudflare Access
 
-Put the deployed Worker behind Access. This repo does not turn Access on in code. There is no account-agnostic Access setting in `wrangler.jsonc` (a comment there points at the dashboard).
+The shared password above is the lock for this hackathon build. Access can replace it later. This repo does not turn Access on in code. There is no account-agnostic Access setting in `wrangler.jsonc` (a comment there points at the dashboard).
 
 After the Worker is deployed (`npm run deploy` or the GitHub Action):
 
@@ -130,7 +148,7 @@ npm run cf:provision
 Then:
 
 1. Paste the real D1 `database_id` over `00000000-0000-0000-0000-000000000000` in `wrangler.jsonc` and commit that change to `main`. The placeholder id will not deploy.
-2. `npx wrangler secret put OPENROUTER_API_KEY` (once; later deploys leave it in place).
+2. `npx wrangler secret put OPENROUTER_API_KEY` and, to lock the site, `npx wrangler secret put SITE_PASSWORD` (once; later deploys leave both in place). Skip `SITE_PASSWORD` only when this copy should stay open.
 3. Merge this workflow to `main`, with the two GitHub secrets set. The next push to `main` (or a manual run) applies `migrations/0001_init.sql` if it is not already applied, then deploys.
 
 You can still deploy by hand with `npm run db:migrate:remote` and `npm run deploy` (`nuxt build && wrangler --cwd .output deploy`). Nitro writes the Worker entry into `.output/server/wrangler.json`. Migrations stay on the root config because `.output` does not contain `migrations/`.
@@ -147,7 +165,7 @@ New vectors can take a few seconds to show up in search. Vectorize applies inser
 4. Insert the document and chunks into D1, including the embedding JSON on `chunks.embedding` (this is what local dev searches). Upsert vectors into Vectorize (id = chunk id, metadata = document id, title, chunk index), except in local dev unless `VECTORIZE_REMOTE=true`.
 5. `POST /api/search` with `{ "query", "topK"? }` embeds the query. Deployed Workers run `VECTORIZE.query` and join the hit ids back to D1. Local dev ranks the stored D1 embeddings with cosine similarity. Either way the response includes chunk text and the source title.
 
-Other routes: `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/documents/:id`, `GET /api/health`.
+Other routes: `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/documents/:id`, `GET /api/health`. With `SITE_PASSWORD` set, direct calls to the document and search routes return 401 before any embedding request. Health stays public. `POST /api/auth/login` checks the password and sets the cookie.
 
 ## Layout
 
@@ -158,7 +176,7 @@ public/robots.txt       disallow every crawler
 public/_headers         X-Robots-Tag on static assets
 migrations/0001_init.sql
 server/api/             upload, list, search
-server/middleware/      X-Robots-Tag on Worker responses
+server/middleware/      X-Robots-Tag and the shared-password gate
 server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes
 app/pages/index.vue     paste/upload and search UI
 ```

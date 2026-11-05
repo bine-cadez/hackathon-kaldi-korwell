@@ -1,10 +1,12 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "doc-library",
-  // Production should sit behind Cloudflare Access. Wrangler has no portable
-  // Access block (it needs your Zero Trust account). After deploy, open
-  // Workers & Pages → doc-library → Access, protect this Worker, and choose
-  // all traffic. https://developers.cloudflare.com/workers/configuration/cloudflare-access/
+  // Optional gate: `npx wrangler secret put SITE_PASSWORD` (unset = unlocked).
+  // Do not put the password in this file. Cloudflare Access can replace the
+  // in-app gate later. Wrangler has no portable Access block (it needs your
+  // Zero Trust account). After deploy, open Workers & Pages → doc-library →
+  // Access, protect this Worker, and choose all traffic.
+  // https://developers.cloudflare.com/workers/configuration/cloudflare-access/
   "compatibility_date": "2026-11-05",
   "compatibility_flags": ["nodejs_compat"],
   "observability": {

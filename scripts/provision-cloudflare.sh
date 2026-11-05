@@ -20,6 +20,7 @@ npx wrangler vectorize create doc-chunks \
   --description "Internal document chunk embeddings"
 echo
 
+
 echo "Creating optional R2 bucket 'doc-library' for raw text blobs..."
 echo "Skip this command if you do not want R2, and remove r2_buckets from wrangler.jsonc."
 npx wrangler r2 bucket create doc-library

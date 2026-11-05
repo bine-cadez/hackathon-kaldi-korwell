@@ -1,0 +1,277 @@
+import assert from 'node:assert/strict'
+import { createApp, defineEventHandler, toWebHandler } from 'h3'
+import { afterEach, describe, test } from 'node:test'
+import login from '../server/api/auth/login.post.ts'
+import sitePassword from '../server/middleware/site-password.ts'
+import {
+  decideSiteAccess,
+  sitePasswordFromSources,
+  siteSessionToken,
+  SITE_AUTH_COOKIE
+} from '../server/utils/site-password.ts'
+
+const savedPassword = process.env.SITE_PASSWORD
+
+afterEach(() => {
+  if (savedPassword === undefined) delete process.env.SITE_PASSWORD
+  else process.env.SITE_PASSWORD = savedPassword
+})
+
+describe('site password decision', { concurrency: false }, () => {
+  test('empty secret leaves every route open', async () => {
+    for (const pathname of ['/api/documents', '/api/search', '/', '/api/documents/doc_1']) {
+      const decision = await decideSiteAccess({
+        sitePassword: '   ',
+        method: 'POST',
+        pathname,
+        cookie: null,
+        authorization: null,
+        sitePasswordHeader: null
+      })
+      assert.equal(decision, 'allow')
+    }
+  })
+
+  test('binding wins over process env and blank binding falls through', () => {
+    assert.equal(sitePasswordFromSources('from-binding', 'from-process'), 'from-binding')
+    assert.equal(sitePasswordFromSources('  ', 'from-process'), 'from-process')
+    assert.equal(sitePasswordFromSources(undefined, '  '), '')
+  })
+
+  test('unauthenticated data APIs are unauthorized when the secret is set', async () => {
+    const locked = [
+      ['POST', '/api/documents'],
+      ['POST', '/api/search'],
+      ['GET', '/api/documents'],
+      ['GET', '/api/documents/doc_1'],
+      ['DELETE', '/api/documents/doc_1'],
+      ['POST', '/api/health'],
+      ['GET', '/']
+    ] as const
+    for (const [method, pathname] of locked) {
+      const decision = await decideSiteAccess({
+        sitePassword: 's3cret',
+        method,
+        pathname,
+        cookie: null,
+        authorization: null,
+        sitePasswordHeader: null
+      })
+      assert.equal(decision, 'unauthorized', `${method} ${pathname}`)
+    }
+  })
+
+  test('health and the login route stay reachable', async () => {
+    assert.equal(await decideSiteAccess({
+      sitePassword: 's3cret',
+      method: 'GET',
+      pathname: '/api/health',
+      cookie: null,
+      authorization: null,
+      sitePasswordHeader: null
+    }), 'allow')
+    assert.equal(await decideSiteAccess({
+      sitePassword: 's3cret',
+      method: 'HEAD',
+      pathname: '/api/health/',
+      cookie: null,
+      authorization: null,
+      sitePasswordHeader: null
+    }), 'allow')
+    assert.equal(await decideSiteAccess({
+      sitePassword: 's3cret',
+      method: 'POST',
+      pathname: '/api/auth/login',
+      cookie: null,
+      authorization: null,
+      sitePasswordHeader: null
+    }), 'allow')
+    assert.equal(await decideSiteAccess({
+      sitePassword: 's3cret',
+      method: 'GET',
+      pathname: '/api/auth/login',
+      cookie: null,
+      authorization: null,
+      sitePasswordHeader: null
+    }), 'unauthorized')
+  })
+
+  test('header, bearer, and session cookie each unlock an API route', async () => {
+    const token = await siteSessionToken('s3cret')
+    assert.equal(await decideSiteAccess({
+      sitePassword: 's3cret',
+      method: 'POST',
+      pathname: '/api/search',
+      cookie: null,
+      authorization: null,
+      sitePasswordHeader: 's3cret'
+    }), 'allow')
+    assert.equal(await decideSiteAccess({
+      sitePassword: 's3cret',
+      method: 'POST',
+      pathname: '/api/documents',
+      cookie: null,
+      authorization: 'Bearer s3cret',
+      sitePasswordHeader: null
+    }), 'allow')
+    assert.equal(await decideSiteAccess({
+      sitePassword: 's3cret',
+      method: 'DELETE',
+      pathname: '/api/documents/doc_1',
+      cookie: token,
+      authorization: null,
+      sitePasswordHeader: null
+    }), 'allow')
+  })
+
+  test('wrong password, raw password cookie, and basic auth stay locked', async () => {
+    assert.equal(await decideSiteAccess({
+      sitePassword: 's3cret',
+      method: 'POST',
+      pathname: '/api/search',
+      cookie: null,
+      authorization: 'Bearer wrong',
+      sitePasswordHeader: 'nope'
+    }), 'unauthorized')
+    assert.equal(await decideSiteAccess({
+      sitePassword: 's3cret',
+      method: 'POST',
+      pathname: '/api/documents',
+      cookie: 's3cret',
+      authorization: null,
+      sitePasswordHeader: null
+    }), 'unauthorized')
+    assert.equal(await decideSiteAccess({
+      sitePassword: 's3cret',
+      method: 'GET',
+      pathname: '/api/documents',
+      cookie: null,
+      authorization: 'Basic s3cret',
+      sitePasswordHeader: null
+    }), 'unauthorized')
+    const oldToken = await siteSessionToken('previous')
+    assert.equal(await decideSiteAccess({
+      sitePassword: 's3cret',
+      method: 'POST',
+      pathname: '/api/search',
+      cookie: oldToken,
+      authorization: null,
+      sitePasswordHeader: null
+    }), 'unauthorized')
+  })
+})
+
+describe('site password HTTP gate', { concurrency: false }, () => {
+  const handler = toWebHandler(createApp()
+    .use(sitePassword)
+    .use('/api/auth/login', login)
+    .use(defineEventHandler(() => ({ reached: true }))))
+
+  test('direct API calls without credentials get 401 and never reach the route', async () => {
+    process.env.SITE_PASSWORD = 's3cret'
+    for (const [method, path] of [
+      ['POST', '/api/documents'],
+      ['POST', '/api/search'],
+      ['GET', '/api/documents'],
+      ['GET', '/api/documents/doc_1'],
+      ['DELETE', '/api/documents/doc_1']
+    ] as const) {
+      const response = await handler(new Request(`http://library.test${path}`, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: method === 'GET' ? undefined : JSON.stringify({ title: 'x', body: 'y', query: 'q' })
+      }))
+      assert.equal(response.status, 401, `${method} ${path}`)
+      const payload = await response.json() as { reached?: boolean, data?: { message?: string } }
+      assert.equal(payload.reached, undefined)
+      assert.match(payload.data?.message || '', /password/i)
+    }
+  })
+
+  test('GET /api/health stays public while the page shows the unlock form', async () => {
+    process.env.SITE_PASSWORD = 's3cret'
+    const health = await handler(new Request('http://library.test/api/health'))
+    assert.equal(health.status, 200)
+    assert.equal((await health.json() as { reached?: boolean }).reached, true)
+
+    const page = await handler(new Request('http://library.test/'))
+    assert.equal(page.status, 401)
+    const html = await page.text()
+    assert.match(html, /type="password"/)
+    assert.match(html, /action="\/api\/auth\/login"/)
+    assert.doesNotMatch(html, /reached/)
+  })
+
+  test('X-Site-Password and Authorization bearer unlock API routes', async () => {
+    process.env.SITE_PASSWORD = 's3cret'
+    const header = await handler(new Request('http://library.test/api/search', {
+      method: 'POST',
+      headers: { 'x-site-password': 's3cret', 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'q' })
+    }))
+    assert.equal(header.status, 200)
+    assert.equal((await header.json() as { reached?: boolean }).reached, true)
+
+    const bearer = await handler(new Request('http://library.test/api/documents', {
+      method: 'POST',
+      headers: { authorization: 'Bearer s3cret', 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 't', body: 'b' })
+    }))
+    assert.equal(bearer.status, 200)
+    assert.equal((await bearer.json() as { reached?: boolean }).reached, true)
+  })
+
+  test('login sets an HttpOnly cookie that unlocks later API calls', async () => {
+    process.env.SITE_PASSWORD = 's3cret'
+    const wrong = await handler(new Request('http://library.test/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'nope' })
+    }))
+    assert.equal(wrong.status, 401)
+    assert.equal(wrong.headers.get('set-cookie'), null)
+
+    const form = await handler(new Request('http://library.test/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ password: 's3cret' })
+    }))
+    assert.equal(form.status, 303)
+    assert.equal(form.headers.get('location'), '/')
+    const setCookie = form.headers.get('set-cookie') || ''
+    assert.match(setCookie, new RegExp(`${SITE_AUTH_COOKIE}=`))
+    assert.match(setCookie, /HttpOnly/i)
+    assert.match(setCookie, /SameSite=Lax/i)
+    assert.doesNotMatch(setCookie, /Secure/i)
+    const token = setCookie.split(';')[0]?.split('=').slice(1).join('=')
+    assert.equal(token, await siteSessionToken('s3cret'))
+    assert.notEqual(token, 's3cret')
+
+    const locked = await handler(new Request('http://library.test/api/documents', { method: 'GET' }))
+    assert.equal(locked.status, 401)
+    const unlocked = await handler(new Request('http://library.test/api/documents', {
+      method: 'GET',
+      headers: { cookie: `${SITE_AUTH_COOKIE}=${token}` }
+    }))
+    assert.equal(unlocked.status, 200)
+
+    const secure = await handler(new Request('https://library.test/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 's3cret' })
+    }))
+    assert.equal(secure.status, 200)
+    assert.match(secure.headers.get('set-cookie') || '', /Secure/i)
+  })
+
+  test('unset SITE_PASSWORD does not block API routes', async () => {
+    delete process.env.SITE_PASSWORD
+    const response = await handler(new Request('http://library.test/api/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'q' })
+    }))
+    assert.equal(response.status, 200)
+    assert.equal((await response.json() as { reached?: boolean }).reached, true)
+  })
+})

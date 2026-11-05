@@ -44,6 +44,7 @@ export interface DocLibraryEnv {
   VECTORIZE: VectorizeIndex
   BLOB?: R2Bucket
   OPENROUTER_API_KEY?: string
+  SITE_PASSWORD?: string
 }
 
 export function readCloudflareEnv (event: { context: { cloudflare?: { env?: DocLibraryEnv } } }): DocLibraryEnv | undefined {

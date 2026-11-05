@@ -95,7 +95,7 @@ npm run db:migrate:remote
 
 Put the deployed Worker behind Access. This repo does not turn Access on in code. There is no account-agnostic Access setting in `wrangler.jsonc` (a comment there points at the dashboard).
 
-After `npm run deploy`:
+After the Worker is deployed (`npm run deploy` or the GitHub Action):
 
 1. In the Cloudflare dashboard, open **Workers & Pages** and select the `doc-library` Worker.
 2. Open the **Access** tab, or **Settings** → **Domains & Routes**.
@@ -108,16 +108,38 @@ Zero Trust has to be enabled on the account first. Access runs before the Worker
 
 ## Deploy
 
-Cloudflare deploy from CI is not wired up. It needs an account API token (`CLOUDFLARE_API_TOKEN`) and an account id that this repo does not have. GitHub Actions only installs, tests, and builds.
+`.github/workflows/ci.yml` installs, tests, and builds on every push and pull request. It does not deploy.
 
-From a machine that is logged into the right Cloudflare account:
+`.github/workflows/deploy.yml` deploys the `doc-library` Worker on push to `main` and from the Actions tab (`workflow_dispatch`). It runs `npm ci`, `npm test`, and `npm run build`, applies remote D1 migrations, then `wrangler deploy --cwd .output --keep-vars`. It does not run `npm run cf:provision`.
+
+### GitHub secrets
+
+Add these in the GitHub repo under **Settings → Secrets and variables → Actions**:
+
+| Secret | Value |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token. Use the **Edit Cloudflare Workers** template (Workers Scripts Edit). Also add **Account → D1 → Edit** so migrations can write. Scope the token to this account. |
+| `CLOUDFLARE_ACCOUNT_ID` | The account id from the Workers dashboard overview. [How to find it](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/). |
+
+Do not add `OPENROUTER_API_KEY` as a GitHub secret for this workflow. The deploy does not pass Wrangler's secret-upload input. `--keep-vars` leaves dashboard variables in place, and Wrangler does not delete Worker secrets on deploy.
+
+### One-time setup before the first green deploy
+
+The workflow only uploads code and applies migrations. Create the resources and the Worker secret once, from a machine logged in with `npx wrangler login`:
 
 ```bash
-npx wrangler secret put OPENROUTER_API_KEY
-npm run deploy
+npm run cf:provision
 ```
 
-`npm run deploy` is `nuxt build && wrangler --cwd .output deploy`. Nitro writes the Worker entry and asset binding into `.output/server/wrangler.json` and merges the D1, Vectorize, and R2 bindings from `wrangler.jsonc`. Run D1 migrations from the repo root (`npm run db:migrate:remote`); the output config's `migrations_dir` is not the source of truth.
+Then:
+
+1. Paste the real D1 `database_id` over `00000000-0000-0000-0000-000000000000` in `wrangler.jsonc` and commit that change to `main`. The placeholder id will not deploy.
+2. `npx wrangler secret put OPENROUTER_API_KEY` (once; later deploys leave it in place).
+3. Merge this workflow to `main`, with the two GitHub secrets set. The next push to `main` (or a manual run) applies `migrations/0001_init.sql` if it is not already applied, then deploys.
+
+You can still deploy by hand with `npm run db:migrate:remote` and `npm run deploy` (`nuxt build && wrangler --cwd .output deploy`). Nitro writes the Worker entry into `.output/server/wrangler.json`. Migrations stay on the root config because `.output` does not contain `migrations/`.
+
+Cloudflare Access is still a dashboard step after deploy. See the section above. The workflow does not enable it.
 
 New vectors can take a few seconds to show up in search. Vectorize applies inserts asynchronously.
 
@@ -134,6 +156,7 @@ Other routes: `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/docum
 ## Layout
 
 ```
+.github/workflows/deploy.yml   push to main deploys the Worker
 wrangler.jsonc          D1, Vectorize, optional R2 bindings
 public/robots.txt       disallow every crawler
 public/_headers         X-Robots-Tag on static assets

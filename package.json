@@ -1,0 +1,26 @@
+{
+  "name": "hackathon-kaldi-korwell",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "preview": "wrangler --cwd .output dev",
+    "postinstall": "nuxt prepare",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "deploy": "nuxt build && wrangler --cwd .output deploy",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "cf:types": "wrangler types",
+    "cf:provision": "bash scripts/provision-cloudflare.sh"
+  },
+  "dependencies": {
+    "nuxt": "^4.6.4",
+    "vue": "^3.5.44",
+    "vue-router": "^5.4.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "wrangler": "^4.158.0"
+  }
+}

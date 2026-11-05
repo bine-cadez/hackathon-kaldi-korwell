@@ -1,0 +1,6 @@
+# Cloudflare applies this file to static assets only (favicon, built JS/CSS, robots.txt).
+# Worker responses set the same header in server middleware and Nuxt route rules.
+# The trailing space on the pattern matches Nitro's "fallback already present" check
+# so the build does not append a second copy of this header.
+/* 
+  X-Robots-Tag: noindex, nofollow

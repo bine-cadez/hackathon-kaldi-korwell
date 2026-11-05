@@ -4,7 +4,7 @@ Hackathon v1 of an internal document library. Someone pastes or uploads a text o
 
 Chat is not in this version. Nothing is embedded until a person uploads it.
 
-This build has **no authentication**. It is meant to stay on an internal network or behind Cloudflare Access. A `workers.dev` URL is reachable by anyone who has the link.
+This build has **no authentication**. `public/robots.txt` disallows every crawler, and every response sends `X-Robots-Tag: noindex, nofollow`. That only asks crawlers to stay away. Production should sit behind [Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/) before anyone shares the URL. A `workers.dev` hostname is public until Access is on.
 
 ## Stack
 
@@ -91,6 +91,21 @@ Apply the remote migration before the first deploy (the Worker also runs `CREATE
 npm run db:migrate:remote
 ```
 
+## Cloudflare Access
+
+Put the deployed Worker behind Access. This repo does not turn Access on in code. There is no account-agnostic Access setting in `wrangler.jsonc` (a comment there points at the dashboard).
+
+After `npm run deploy`:
+
+1. In the Cloudflare dashboard, open **Workers & Pages** and select the `doc-library` Worker.
+2. Open the **Access** tab, or **Settings** → **Domains & Routes**.
+3. Protect this Worker and choose **all traffic** (production and previews).
+4. Allow your team (Cloudflare account membership, specific emails, or an email domain).
+
+Zero Trust has to be enabled on the account first. Access runs before the Worker, so the app does not validate a JWT.
+
+`public/robots.txt` is `Disallow: /` for every user agent. Worker responses (pages, API, errors) set `X-Robots-Tag: noindex, nofollow` in `server/middleware/robots-tag.ts` and in Nuxt `routeRules`. Static files such as the favicon and built assets are served by Cloudflare without entering the Worker, so `public/_headers` sets the same header on those responses.
+
 ## Deploy
 
 Cloudflare deploy from CI is not wired up. It needs an account API token (`CLOUDFLARE_API_TOKEN`) and an account id that this repo does not have. GitHub Actions only installs, tests, and builds.
@@ -120,8 +135,11 @@ Other routes: `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/docum
 
 ```
 wrangler.jsonc          D1, Vectorize, optional R2 bindings
+public/robots.txt       disallow every crawler
+public/_headers         X-Robots-Tag on static assets
 migrations/0001_init.sql
 server/api/             upload, list, search
+server/middleware/      X-Robots-Tag on Worker responses
 server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes
 app/pages/index.vue     paste/upload and search UI
 ```

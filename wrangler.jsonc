@@ -9,27 +9,32 @@
   "compatibility_flags": ["nodejs_compat"],
   "observability": {
     "enabled": true,
-    "logs": { "enabled": true, "head_sampling_rate": 1 },
-    "traces": { "enabled": true, "head_sampling_rate": 1 }
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+    },
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "doc-library",
       "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    }
+      "migrations_dir": "migrations",
+    },
+    {
+      "binding": "doc_library",
+      "database_name": "doc-library",
+      "database_id": "3f6350fe-7ed5-4b5c-baaf-fad9e47e1571",
+    },
   ],
   "vectorize": [
     {
       "binding": "VECTORIZE",
-      "index_name": "doc-chunks"
-    }
+      "index_name": "doc-chunks",
+    },
   ],
-  "r2_buckets": [
-    {
-      "binding": "BLOB",
-      "bucket_name": "doc-library"
-    }
-  ]
 }

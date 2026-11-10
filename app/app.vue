@@ -1,3 +1,9 @@
+<script setup lang="ts">
+useHead({
+  link: [{ rel: 'icon', type: 'image/svg+xml', href: '/korwell-eye.svg?v=2' }]
+})
+</script>
+
 <template>
   <div>
     <NuxtRouteAnnouncer />

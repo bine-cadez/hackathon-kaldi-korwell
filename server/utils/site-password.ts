@@ -39,7 +39,7 @@ export function normalizePathname (pathname: string): string {
 export function isPublicRoute (method: string, pathname: string): boolean {
   const verb = method.toUpperCase()
   const path = normalizePathname(pathname)
-  if ((verb === 'GET' || verb === 'HEAD') && (path === '/api/health' || path === '/favicon.ico' || path === '/robots.txt')) {
+  if ((verb === 'GET' || verb === 'HEAD') && (path === '/api/health' || path === '/favicon.ico' || path === '/korwell-eye.svg' || path === '/robots.txt')) {
     return true
   }
   return verb === 'POST' && path === '/api/auth/login'
@@ -93,6 +93,7 @@ export function loginFormHtml (error: boolean): string {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Unlock document library</title>
+  <link rel="icon" type="image/svg+xml" href="/korwell-eye.svg?v=2">
   <style>
     :root { color-scheme: light; }
     body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f3efe4; color: #1c1915; font-family: "Segoe UI", "Helvetica Neue", sans-serif; }

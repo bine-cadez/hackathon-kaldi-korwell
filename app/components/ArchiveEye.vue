@@ -42,17 +42,17 @@ onBeforeUnmount(() => {
   <svg ref="eye" class="archive-eye" width="200" height="100" aria-hidden="true" viewBox="0 0 240 120">
     <defs>
       <pattern id="lines" width="5" height="5" patternUnits="userSpaceOnUse">
-        <path d="M0 4h5" stroke="#593d14" stroke-width="1.4"/>
+        <path d="M0 4h5" style="stroke: var(--accent)" stroke-width="1.4"/>
       </pattern>
     </defs>
-    <path fill="none" stroke="#593d14" stroke-width="2" d="M120 4 233 60 120 116 7 60Z"/>
-    <path id="eye" fill="#fd4e1f" d="M37 59c22-28 51-39 83-39 34 0 63 14 83 39-21 26-50 42-83 42-34 0-63-16-83-42Z"/>
+    <path fill="none" style="stroke: var(--accent)" stroke-width="2" d="M120 4 233 60 120 116 7 60Z"/>
+    <path id="eye" style="fill: var(--brand-orange)" d="M37 59c22-28 51-39 83-39 34 0 63 14 83 39-21 26-50 42-83 42-34 0-63-16-83-42Z"/>
     <use href="#eye" fill="url(#lines)" style="fill:url(#lines)"/>
     <g :transform="`translate(${offset.x} ${offset.y})`">
-      <circle cx="125" cy="56" r="28" fill="#382811"/>
-      <circle cx="125" cy="56" r="23" fill="none" stroke="#fd4e1f" stroke-width="1.5"/>
-      <path fill="#f2f0ed" d="M130 42h13v5h-13z"/>
+      <circle cx="125" cy="56" r="28" style="fill: var(--ink)"/>
+      <circle cx="125" cy="56" r="23" fill="none" style="stroke: var(--brand-orange)" stroke-width="1.5"/>
+      <path style="fill: var(--paper)" d="M130 42h13v5h-13z"/>
     </g>
-    <path d="M18 60h9m186 0h9" stroke="#593d14" stroke-width="2"/>
+    <path d="M18 60h9m186 0h9" style="stroke: var(--accent)" stroke-width="2"/>
   </svg>
 </template>

@@ -313,6 +313,10 @@ textarea::placeholder {
   line-height: 1.5;
 }
 
+/* Animate only the eye so navigation stays live under the transition. */
+:root { view-transition-name: none; }
+::view-transition { pointer-events: none; }
+
 .archive-eye { view-transition-name: archive-eye; }
 
 .archive-page .archive-eye {
@@ -350,9 +354,4 @@ textarea::placeholder {
 @keyframes archive-eye-return {
   0%, 40% { opacity: 0; }
   82%, 100% { opacity: 1; }
-}
-
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 160ms;
 }

@@ -29,6 +29,7 @@ const sampleNotes = [
 ]
 
 const query = ref('')
+const archiveEye = ref<{ lookAt: (x: number, y: number) => void } | null>(null)
 const queryInput = ref<HTMLInputElement | null>(null)
 const queryInvalid = ref(false)
 const searching = ref(false)
@@ -39,10 +40,40 @@ const matches = ref<SearchMatch[]>([])
 const selected = ref<DocumentDetail | null>(null)
 const detailError = ref('')
 
+let caretFrame = 0
+let caretMeasure: CanvasRenderingContext2D | null = null
+
+function followCaret () {
+  cancelAnimationFrame(caretFrame)
+  caretFrame = requestAnimationFrame(() => {
+    const input = queryInput.value
+    if (!input || document.activeElement !== input) return
+    caretMeasure ??= document.createElement('canvas').getContext('2d')
+    if (!caretMeasure) return
+
+    const style = getComputedStyle(input)
+    const bounds = input.getBoundingClientRect()
+    const start = bounds.left + input.clientLeft + parseFloat(style.paddingLeft)
+    const end = start + input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    caretMeasure.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+    const caret = input.selectionDirection === 'backward' ? input.selectionStart : input.selectionEnd
+    const width = caretMeasure.measureText(input.value.slice(0, caret ?? 0)).width
+    const x = Math.max(start, Math.min(end, start + width - input.scrollLeft))
+    archiveEye.value?.lookAt(x, bounds.top + bounds.height / 2)
+  })
+}
+
+onMounted(() => document.addEventListener('selectionchange', followCaret))
+onBeforeUnmount(() => {
+  document.removeEventListener('selectionchange', followCaret)
+  cancelAnimationFrame(caretFrame)
+})
+
 function clearQuery () {
   query.value = ''
   queryInvalid.value = false
   queryInput.value?.focus()
+  followCaret()
 }
 
 async function runSearch () {
@@ -98,12 +129,12 @@ async function openDocument (id: string) {
 <template>
   <main class="search-page">
     <section class="search-hero" aria-labelledby="korwell-title">
-      <img class="archive-eye" src="/archive-eye.svg" alt="" width="200" height="100">
+      <ArchiveEye ref="archiveEye" />
       <p class="eyebrow">The Kaldi archive</p>
       <h1 id="korwell-title">Korwell</h1>
       <form class="search-bar" role="search" novalidate @submit.prevent="runSearch">
         <label class="sr-only" for="archive-query">Search Kaldi’s knowledge</label>
-        <input id="archive-query" ref="queryInput" v-model="query" :aria-invalid="queryInvalid || undefined" :aria-describedby="queryInvalid ? 'archive-query-error' : undefined" @input="queryInvalid = false" type="search" name="query" required placeholder="Search Kaldi’s knowledge…">
+        <input id="archive-query" ref="queryInput" v-model="query" :aria-invalid="queryInvalid || undefined" :aria-describedby="queryInvalid ? 'archive-query-error' : undefined" @input="queryInvalid = false; followCaret()" @focus="followCaret" @click="followCaret" @keyup="followCaret" type="text" inputmode="search" enterkeyhint="search" name="query" required placeholder="Search Kaldi’s knowledge…">
         <button v-if="query" class="clear-search" type="button" aria-label="Clear search" title="Clear search" @click="clearQuery">
           <svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true">
             <path d="m6 6 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>

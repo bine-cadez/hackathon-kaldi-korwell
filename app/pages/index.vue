@@ -1,21 +1,4 @@
 <script setup lang="ts">
-interface Health {
-  ok: boolean
-  auth?: 'open' | 'password' | 'none'
-  embeddingModel: string
-  dimensions: number
-  vectorBackend: 'd1' | 'vectorize'
-  bindings: { db: boolean, vectorize: boolean, blob: boolean }
-}
-
-interface LibraryDocument {
-  id: string
-  title: string
-  createdAt: string
-  r2Key: string | null
-  chunkCount: number
-}
-
 interface SearchMatch {
   chunkId: string
   documentId: string
@@ -34,87 +17,60 @@ interface DocumentDetail {
   chunks: Array<{ id: string, chunkIndex: number, content: string }>
 }
 
-const requestHeaders = useRequestHeaders(['cookie'])
-const { data: health } = await useFetch<Health>('/api/health')
-const { data: library, refresh: refreshLibrary } = await useFetch<{ documents: LibraryDocument[] }>('/api/documents', {
-  headers: requestHeaders
-})
-
-const title = ref('')
-const body = ref('')
-const saving = ref(false)
-const saveMessage = ref('')
-const saveError = ref('')
-const fileInput = ref<HTMLInputElement | null>(null)
+const route = useRoute()
+const preview = computed(() => import.meta.dev && route.query.preview === '1')
+const sampleProjects = ['Atlas', 'Beacon', 'Cedar', 'Delta', 'Ember', 'Fieldwork', 'Harbor', 'Juniper', 'Northstar', 'Signal']
+const sampleNotes = [
+  ['Project overview', 'The team agreed on the initial scope and documented the decisions that still need sign-off. The next review will cover delivery dates and dependencies.'],
+  ['Launch checklist', 'Confirm the staging deployment, review the rollback steps, and ask the project lead to approve the release before notifying stakeholders.'],
+  ['Meeting notes', 'The team reviewed open questions and assigned owners. Bring an updated timeline and any unresolved dependencies to the next check-in.'],
+  ['Support handover', 'The support team should check the dashboard first, then follow the escalation path in the runbook if the issue persists.'],
+  ['Retrospective', 'The team wants to keep the weekly demos and document decisions earlier. Follow-up actions will be reviewed at the next planning session.']
+]
 
 const query = ref('')
+const queryInput = ref<HTMLInputElement | null>(null)
+const queryInvalid = ref(false)
 const searching = ref(false)
+const searched = ref(false)
 const searchError = ref('')
 const matches = ref<SearchMatch[]>([])
 
 const selected = ref<DocumentDetail | null>(null)
 const detailError = ref('')
 
-function errorMessage (error: unknown): string {
-  if (error && typeof error === 'object') {
-    const record = error as {
-      data?: { message?: string, statusMessage?: string, data?: { message?: string } }
-      statusMessage?: string
-      message?: string
-    }
-    return record.data?.message
-      || record.data?.data?.message
-      || record.data?.statusMessage
-      || record.statusMessage
-      || record.message
-      || 'Request failed'
-  }
-  return 'Request failed'
-}
-
-function onFile (event: Event) {
-  const input = event.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file) return
-  if (file.size > 250_000) {
-    saveError.value = 'File is larger than the v1 limit (about 200k characters). Split it first.'
-    input.value = ''
-    return
-  }
-  const reader = new FileReader()
-  reader.onload = () => {
-    body.value = String(reader.result || '')
-    if (!title.value.trim()) title.value = file.name.replace(/\.(md|markdown|txt)$/i, '')
-    saveError.value = ''
-  }
-  reader.readAsText(file)
-}
-
-async function saveDocument () {
-  saving.value = true
-  saveMessage.value = ''
-  saveError.value = ''
-  try {
-    const saved = await $fetch<{ title: string, chunkCount: number, r2Key: string | null }>('/api/documents', {
-      method: 'POST',
-      body: { title: title.value, body: body.value }
-    })
-    saveMessage.value = `Saved “${saved.title}” as ${saved.chunkCount} chunk${saved.chunkCount === 1 ? '' : 's'}. Search can lag a few seconds while Vectorize indexes the new vectors.`
-    title.value = ''
-    body.value = ''
-    if (fileInput.value) fileInput.value.value = ''
-    await refreshLibrary()
-  } catch (error) {
-    saveError.value = errorMessage(error)
-  } finally {
-    saving.value = false
-  }
+function clearQuery () {
+  query.value = ''
+  queryInvalid.value = false
+  queryInput.value?.focus()
 }
 
 async function runSearch () {
+  if (searching.value) return
+  if (!query.value.trim()) {
+    queryInvalid.value = true
+    queryInput.value?.focus()
+    return
+  }
+  queryInvalid.value = false
   searching.value = true
+  searched.value = true
+  selected.value = null
+  detailError.value = ''
   searchError.value = ''
   try {
+    if (preview.value) {
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      matches.value = sampleProjects.flatMap(project => sampleNotes.map(([title, content]) => ({
+        chunkId: `preview-${project}-${title}`,
+        documentId: '',
+        title: `${project} · ${title}`,
+        chunkIndex: 0,
+        content,
+        score: 0
+      })))
+      return
+    }
     const result = await $fetch<{ matches: SearchMatch[] }>('/api/search', {
       method: 'POST',
       body: { query: query.value, topK: 5 }
@@ -137,139 +93,52 @@ async function openDocument (id: string) {
     detailError.value = errorMessage(error)
   }
 }
-
-async function removeDocument (id: string) {
-  if (!confirm('Delete this document and its vectors?')) return
-  try {
-    await $fetch(`/api/documents/${id}`, { method: 'DELETE' })
-    if (selected.value?.id === id) selected.value = null
-    await refreshLibrary()
-  } catch (error) {
-    detailError.value = errorMessage(error)
-  }
-}
-
-function formatScore (score: number) {
-  return score.toFixed(3)
-}
 </script>
 
 <template>
-  <main class="shell">
-    <header class="top">
-      <div>
-        <h1>Document library</h1>
-        <p class="lede">
-          Paste or upload a note. On save, the app chunks it, embeds each chunk with OpenRouter, and stores the text in D1 plus the vectors in Vectorize.
-        </p>
-      </div>
-      <p v-if="health" class="meta">
-        {{ health.embeddingModel }} · {{ health.dimensions }}d
-      </p>
-    </header>
+  <main class="search-page">
+    <section class="search-hero" aria-labelledby="korwell-title">
+      <img class="archive-eye" src="/archive-eye.svg" alt="" width="200" height="100">
+      <p class="eyebrow">The Kaldi archive</p>
+      <h1 id="korwell-title">Korwell</h1>
+      <form class="search-bar" role="search" novalidate @submit.prevent="runSearch">
+        <label class="sr-only" for="archive-query">Search Kaldi’s knowledge</label>
+        <input id="archive-query" ref="queryInput" v-model="query" :aria-invalid="queryInvalid || undefined" :aria-describedby="queryInvalid ? 'archive-query-error' : undefined" @input="queryInvalid = false" type="search" name="query" required placeholder="Search Kaldi’s knowledge…">
+        <button v-if="query" class="clear-search" type="button" aria-label="Clear search" title="Clear search" @click="clearQuery">
+          <svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true">
+            <path d="m6 6 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <button class="search-eye-button" type="submit" :disabled="searching" :aria-label="searching ? 'Searching…' : 'Search'" title="Search">
+          <svg class="search-button-eye" :class="{ 'is-blinking': searching }" viewBox="0 0 40 24" fill="none" aria-hidden="true">
+            <path d="M2 12C7 6 13 3 20 3s13 3 18 9c-5 6-11 9-18 9S7 18 2 12Z" stroke="currentColor" stroke-width="2"/>
+            <circle cx="20" cy="12" r="5" fill="currentColor"/>
+          </svg>
+        </button>
+      </form>
+      <p v-if="queryInvalid" id="archive-query-error" class="query-feedback" role="alert">Enter a search term to look through the archive.</p>
+      <p v-if="preview" class="meta">Design preview · sample documents</p>
+    </section>
 
-    <p v-if="health?.auth === 'password'" class="banner">
-      <strong>Shared password.</strong>
-      This browser is unlocked. Upload and search still require the <code>site_auth</code> cookie. API clients send <code>Authorization: Bearer</code> or <code>X-Site-Password</code>. Cloudflare Access can replace this gate later.
-    </p>
-    <p v-else class="banner">
-      <strong>Unlocked.</strong>
-      <code>SITE_PASSWORD</code> is empty, so anyone who can open this URL can upload and search. Set the Worker secret before sharing it. Embeddings run only when someone saves a document.
-    </p>
-
-    <p v-if="health?.vectorBackend === 'd1'" class="banner">
-      Local dev stores chunk vectors on the D1 chunk row and ranks them in the Worker. Wrangler has no local Vectorize simulator. Deployed search uses the Vectorize index. Set <code>VECTORIZE_REMOTE=true</code> to write the remote index from dev.
-    </p>
-
-    <p v-if="health && !health.ok" class="banner err">
-      D1 or Vectorize is not bound
-      (db {{ health.bindings.db ? 'yes' : 'no' }},
-      vectorize {{ health.bindings.vectorize ? 'yes' : 'no' }},
-      r2 {{ health.bindings.blob ? 'yes' : 'no' }}).
-      Local dev needs the cloudflare_module preset and wrangler.jsonc.
-    </p>
-
-    <div class="layout">
-      <section class="stack">
-        <form class="card" @submit.prevent="saveDocument">
-          <h2>Add a document</h2>
-          <label>
-            Title
-            <input v-model="title" type="text" name="title" maxlength="200" required placeholder="Runbook title">
-          </label>
-          <label>
-            Body
-            <textarea v-model="body" name="body" required placeholder="Paste markdown or plain text" />
-          </label>
-          <label>
-            Or upload .md / .txt
-            <input ref="fileInput" type="file" accept=".md,.markdown,.txt,text/plain,text/markdown" @change="onFile">
-          </label>
-          <div class="row">
-            <button class="primary" type="submit" :disabled="saving">
-              {{ saving ? 'Embedding…' : 'Save and embed' }}
-            </button>
-          </div>
-          <p v-if="saveMessage" class="ok">{{ saveMessage }}</p>
-          <p v-if="saveError" class="err">{{ saveError }}</p>
-        </form>
-
-        <section class="card">
-          <h2>Library</h2>
-          <p v-if="!library?.documents?.length" class="note">No documents yet.</p>
-          <ul v-else class="doc-list">
-            <li v-for="document in library.documents" :key="document.id">
-              <div>
-                <button class="link" type="button" @click="openDocument(document.id)">
-                  {{ document.title }}
-                </button>
-                <div class="meta">{{ document.chunkCount }} chunks</div>
-              </div>
-              <button class="danger" type="button" @click="removeDocument(document.id)">Delete</button>
-            </li>
-          </ul>
-          <p v-if="detailError" class="err">{{ detailError }}</p>
-        </section>
-      </section>
-
-      <section class="stack">
-        <form class="card search" @submit.prevent="runSearch">
-          <h2>Search</h2>
-          <label>
-            Query
-            <input v-model="query" type="text" name="query" required placeholder="What should I look up?">
-          </label>
-          <div class="row">
-            <button class="primary" type="submit" :disabled="searching">
-              {{ searching ? 'Searching…' : 'Search chunks' }}
-            </button>
-          </div>
-          <p v-if="searchError" class="err">{{ searchError }}</p>
-          <p v-else-if="matches.length === 0" class="note">Matches show the source document title and the chunk text.</p>
-          <ol v-else class="results">
-            <li v-for="match in matches" :key="match.chunkId" class="result">
-              <div class="row" style="justify-content: space-between;">
-                <h3>{{ match.title || 'Untitled' }}</h3>
-                <span class="score">{{ formatScore(match.score) }}</span>
-              </div>
-              <p class="meta">Chunk {{ match.chunkIndex + 1 }}</p>
-              <p class="chunk">{{ match.content || 'Chunk text was not found in D1.' }}</p>
-              <button v-if="match.documentId" class="ghost" type="button" @click="openDocument(match.documentId)">
-                Open source
-              </button>
-            </li>
-          </ol>
-        </form>
-
+    <section v-if="searched" class="search-results" aria-label="Search results" :aria-busy="searching">
+      <p v-if="searching" role="status">Searching the archive…</p>
+      <p v-else-if="searchError" class="err" role="alert">{{ searchError }}</p>
+      <p v-else-if="!matches.length" role="status">No matching passages found. Try a different search.</p>
+      <template v-else>
+        <h2>{{ preview ? `${matches.length} sample results` : 'From the archive' }}</h2>
+        <ol class="results">
+          <li v-for="match in matches" :key="match.chunkId" class="result">
+            <h3>{{ match.title || 'Untitled' }}</h3>
+            <p class="chunk">{{ match.content || 'Passage unavailable.' }}</p>
+            <button v-if="match.documentId" class="ghost" type="button" @click="openDocument(match.documentId)">Open document</button>
+          </li>
+        </ol>
+        <p v-if="detailError" class="err" role="alert">{{ detailError }}</p>
         <article v-if="selected" class="card">
           <h2>{{ selected.title }}</h2>
-          <p class="meta">
-            {{ selected.chunks.length }} chunks
-            <template v-if="selected.r2Key"> · raw file in R2</template>
-          </p>
           <pre class="body">{{ selected.body }}</pre>
         </article>
-      </section>
-    </div>
+      </template>
+    </section>
   </main>
 </template>

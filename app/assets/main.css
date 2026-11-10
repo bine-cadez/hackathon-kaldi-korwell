@@ -1,3 +1,24 @@
+@font-face {
+  font-family: "Passenger Sans";
+  src: url("/kaldi-fonts/passenger-400.otf") format("opentype");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Passenger Sans";
+  src: url("/kaldi-fonts/passenger-700.otf") format("opentype");
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tiempos Headline";
+  src: url("/kaldi-fonts/tiempos-600.otf") format("opentype");
+  font-weight: 600;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
   --paper: #f3efe4;
@@ -10,7 +31,7 @@
   --warn: #8a341f;
   --ok: #1f6b3a;
   --shadow: 0 1px 0 rgba(28, 25, 21, 0.04);
-  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+  font-family: "Passenger Sans", "Segoe UI", "Helvetica Neue", sans-serif;
   color: var(--ink);
   background: var(--paper);
 }
@@ -44,7 +65,7 @@ header.top {
 }
 
 h1, h2, h3 {
-  font-family: Georgia, "Iowan Old Style", serif;
+  font-family: "Tiempos Headline", Georgia, serif;
   font-weight: 600;
   letter-spacing: -0.02em;
   margin: 0;
@@ -146,7 +167,7 @@ button:disabled { opacity: 0.6; cursor: progress; }
 pre.body, .chunk {
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: "Iowan Old Style", Georgia, serif;
+  font-family: "Passenger Sans", "Segoe UI", sans-serif;
   line-height: 1.5;
   margin: 0.5rem 0 0;
 }
@@ -156,4 +177,146 @@ pre.body, .chunk {
   header.top { flex-direction: column; align-items: flex-start; }
   h1 { font-size: 2rem; }
   .shell { width: min(1120px, calc(100% - 1.25rem)); }
+}
+
+/* Kaldi palette */
+:root {
+  --paper: #f2f0ed;
+  --card: #fff;
+  --ink: #382811;
+  --muted: #695944;
+  --line: #d7cfc5;
+  --accent: #593d14;
+  --accent-ink: #f2f0ed;
+}
+
+body {
+  background: var(--paper);
+}
+
+.archive-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+  padding: 0.8rem clamp(1rem, 5vw, 4rem);
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-bottom: 3px solid #fd4e1f;
+}
+
+.archive-header nav { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; }
+.archive-header a { color: inherit; text-decoration: none; }
+.archive-header nav a:hover,
+.archive-header nav a.router-link-exact-active { text-decoration: underline; text-underline-offset: 0.35em; }
+
+.archive-brand,
+.search-hero h1 {
+  font-family: "Tiempos Headline", Georgia, serif;
+  font-weight: 600;
+}
+
+.archive-brand { font-size: 1.9rem; }
+.archive-page, .search-page { width: min(46rem, calc(100% - 2rem)); margin: auto; padding: 2.5rem 0 4rem; }
+.archive-page .card + .card { margin-top: 1rem; }
+.search-hero { text-align: center; }
+.archive-eye { display: block; width: clamp(9rem, 28vw, 13rem); height: auto; margin: 0 auto 1.25rem; }
+.eyebrow { color: var(--accent); font: 700 0.75rem/1.4 "Passenger Sans", sans-serif; text-transform: uppercase; letter-spacing: 0.2em; }
+.search-hero h1 { color: var(--accent); font-size: clamp(4rem, 13vw, 7.5rem); line-height: 1; margin: 0 0 1.35rem; }
+.search-bar { display: flex; gap: 0.45rem; padding: 0.35rem; border: 1px solid var(--accent); background: var(--card); }
+.search-bar input { flex: 1; min-width: 0; width: 100%; border: 0; background: transparent; padding: 0.7rem; }
+.search-bar button { border: 0; padding: 0.7rem clamp(0.7rem, 3vw, 1.5rem); background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.search-results { margin-top: 2rem; padding-top: 1rem; border-top: 3px double var(--line); }
+.search-results .card { margin-top: 1rem; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.search-bar .search-eye-button {
+  display: grid;
+  place-items: center;
+  min-width: 3.5rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  color: #fd4e1f;
+}
+
+.search-button-eye { display: block; width: 2rem; height: 1.25rem; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .search-button-eye.is-blinking { animation: search-eye-blink 1s ease-in-out infinite; }
+
+  @keyframes search-eye-blink {
+    0%, 50%, 80%, 100% { transform: scaleY(1); }
+    65% { transform: scaleY(0.08); }
+  }
+}
+
+.query-feedback {
+  margin: 0.65rem 0 0;
+  padding: 0.65rem 0.8rem;
+  border-inline-start: 3px solid #fd4e1f;
+  background: var(--card);
+  color: var(--accent);
+  text-align: start;
+}
+
+.search-bar:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.search-bar input:focus { outline: none; }
+
+.search-bar input::-webkit-search-cancel-button { appearance: none; }
+
+.search-bar .clear-search {
+  display: grid;
+  place-items: center;
+  align-self: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: none;
+  padding: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--accent);
+}
+
+.search-bar .clear-search:hover { background: var(--paper); }
+
+.archive-page > h1 {
+  line-height: 1.12;
+  margin-bottom: 1.4rem;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+.archive-page :is(input, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.archive-page input[type="file"] {
+  max-width: 100%;
+  color: var(--ink);
+}
+
+.archive-page input[type="file"]::file-selector-button {
+  margin-inline-end: 0.65rem;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+
+.archive-page input[type="file"]::file-selector-button:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
 }

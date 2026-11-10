@@ -305,3 +305,10 @@ textarea::placeholder {
   background: var(--accent);
   color: var(--accent-ink);
 }
+
+.archive-quote {
+  min-height: 1.5em;
+  margin: 0.75rem auto 1rem;
+  color: var(--muted);
+  line-height: 1.5;
+}

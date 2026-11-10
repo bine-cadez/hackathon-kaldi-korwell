@@ -2,7 +2,7 @@
   <div>
     <NuxtRouteAnnouncer />
     <header class="archive-header">
-      <NuxtLink class="archive-brand" to="/">Korwell</NuxtLink>
+      <NuxtLink class="archive-brand" to="/">The Kaldi Archive</NuxtLink>
       <nav aria-label="Main navigation">
         <NuxtLink to="/">Search</NuxtLink>
         <NuxtLink to="/library">Library</NuxtLink>

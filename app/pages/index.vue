@@ -17,8 +17,38 @@ interface DocumentDetail {
   chunks: Array<{ id: string, chunkIndex: number, content: string }>
 }
 
+// Excerpts checked against the text of Nineteen Eighty-Four, Parts I and II.
+const archiveQuotes = [
+  'The best books, he perceived, are those that tell you what you know already.',
+  'The heresy of heresies was common sense.',
+  'Sanity is not statistical',
+  'I understand HOW',
+  'understand WHY',
+  'The solid world exists',
+  'a taste for solitude',
+  'ownlife',
+  'real coffee',
+  'a tiny world',
+  'thoughts to words',
+  'human heritage',
+  'profound wisdom'
+]
+const archiveQuote = ref('')
+
+onMounted(() => {
+  const key = 'korwell-archive-quote'
+  let index = 0
+  try {
+    index = (Number(sessionStorage.getItem(key) ?? -1) + 1) % archiveQuotes.length
+    sessionStorage.setItem(key, String(index))
+  } catch {
+    index = Math.floor(Math.random() * archiveQuotes.length)
+  }
+  archiveQuote.value = archiveQuotes[index] ?? archiveQuotes[0]!
+})
+
 const route = useRoute()
-const preview = computed(() => import.meta.dev && route.query.preview === '1')
+const preview = computed(() => import.meta.dev && (route.query.preview === '1' || route.query.preview === 'empty'))
 const sampleProjects = ['Atlas', 'Beacon', 'Cedar', 'Delta', 'Ember', 'Fieldwork', 'Harbor', 'Juniper', 'Northstar', 'Signal']
 const sampleNotes = [
   ['Project overview', 'The team agreed on the initial scope and documented the decisions that still need sign-off. The next review will cover delivery dates and dependencies.'],
@@ -92,7 +122,7 @@ async function runSearch () {
   try {
     if (preview.value) {
       await new Promise(resolve => setTimeout(resolve, 3000))
-      matches.value = sampleProjects.flatMap(project => sampleNotes.map(([title, content]) => ({
+      matches.value = route.query.preview === 'empty' ? [] : sampleProjects.flatMap(project => sampleNotes.map(([title, content]) => ({
         chunkId: `preview-${project}-${title}`,
         documentId: '',
         title: `${project} · ${title}`,
@@ -129,8 +159,8 @@ async function openDocument (id: string) {
 <template>
   <main class="search-page">
     <section class="search-hero" aria-labelledby="korwell-title">
-      <ArchiveEye ref="archiveEye" />
-      <p class="eyebrow">The Kaldi archive</p>
+      <ArchiveEye ref="archiveEye" :no-results="searched && !searching && !searchError && !matches.length" />
+      <p class="eyebrow archive-quote"><q v-if="archiveQuote">{{ archiveQuote }}</q></p>
       <h1 id="korwell-title">Korwell</h1>
       <form class="search-bar" role="search" novalidate @submit.prevent="runSearch">
         <label class="sr-only" for="archive-query">Search Kaldi’s knowledge</label>

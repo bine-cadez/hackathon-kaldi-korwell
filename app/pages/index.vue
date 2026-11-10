@@ -159,21 +159,21 @@ async function openDocument (id: string) {
 <template>
   <main class="search-page">
     <section class="search-hero" aria-labelledby="korwell-title">
-      <ArchiveEye ref="archiveEye" :no-results="searched && !searching && !searchError && !matches.length" />
+      <ArchiveEye ref="archiveEye" :searching="searching" :no-results="searched && !searching && !searchError && !matches.length" />
       <p class="eyebrow archive-quote"><q v-if="archiveQuote">{{ archiveQuote }}</q></p>
       <h1 id="korwell-title">Korwell</h1>
       <form class="search-bar" role="search" novalidate @submit.prevent="runSearch">
-        <label class="sr-only" for="archive-query">Search Kaldi’s knowledge</label>
-        <input id="archive-query" ref="queryInput" v-model="query" :aria-invalid="queryInvalid || undefined" :aria-describedby="queryInvalid ? 'archive-query-error' : undefined" @input="queryInvalid = false; followCaret()" @focus="followCaret" @click="followCaret" @keyup="followCaret" type="text" inputmode="search" enterkeyhint="search" name="query" required placeholder="Search Kaldi’s knowledge…">
+        <label class="sr-only" for="archive-query">Search the records</label>
+        <input id="archive-query" ref="queryInput" v-model="query" :aria-invalid="queryInvalid || undefined" :aria-describedby="queryInvalid ? 'archive-query-error' : undefined" @input="queryInvalid = false; followCaret()" @focus="followCaret" @click="followCaret" @keyup="followCaret" type="text" inputmode="search" enterkeyhint="search" name="query" required placeholder="Search the records…">
         <button v-if="query" class="clear-search" type="button" aria-label="Clear search" title="Clear search" @click="clearQuery">
           <svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true">
             <path d="m6 6 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
           </svg>
         </button>
-        <button class="search-eye-button" type="submit" :disabled="searching" :aria-label="searching ? 'Searching…' : 'Search'" title="Search">
-          <svg class="search-button-eye" :class="{ 'is-blinking': searching }" viewBox="0 0 40 24" fill="none" aria-hidden="true">
-            <path d="M2 12C7 6 13 3 20 3s13 3 18 9c-5 6-11 9-18 9S7 18 2 12Z" stroke="currentColor" stroke-width="2"/>
-            <circle cx="20" cy="12" r="5" fill="currentColor"/>
+        <button class="search-submit" type="submit" :disabled="searching" :aria-label="searching ? 'Searching…' : 'Search'" title="Search">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="5.5" stroke="currentColor" stroke-width="2"/>
+            <path d="m15 15 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
         </button>
       </form>

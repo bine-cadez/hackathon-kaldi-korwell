@@ -216,25 +216,17 @@ pre.body, .chunk {
 .search-results .card { margin-top: 1rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-.search-bar .search-eye-button {
+.search-bar .search-submit {
   display: grid;
   place-items: center;
-  min-width: 3.5rem;
+  min-width: 2.75rem;
   min-height: 2.75rem;
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem;
+  background: transparent;
   color: var(--brand-orange);
 }
 
-.search-button-eye { display: block; width: 2rem; height: 1.25rem; }
-
-@media (prefers-reduced-motion: no-preference) {
-  .search-button-eye.is-blinking { animation: search-eye-blink 1s ease-in-out infinite; }
-
-  @keyframes search-eye-blink {
-    0%, 50%, 80%, 100% { transform: scaleY(1); }
-    65% { transform: scaleY(0.08); }
-  }
-}
+.search-bar .search-submit:hover:not(:disabled) { background: var(--paper); }
 
 .query-feedback {
   margin: 0.65rem 0 0;

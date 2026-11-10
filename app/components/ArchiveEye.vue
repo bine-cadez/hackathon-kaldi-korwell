@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = defineProps<{ noResults?: boolean }>()
+const props = defineProps<{ noResults?: boolean, searching?: boolean }>()
 const closed = ref(false)
 watch(() => props.noResults, (noResults) => { closed.value = noResults })
 
@@ -63,7 +63,7 @@ onBeforeUnmount(() => {
       <path style="fill: var(--paper)" d="M130 42h13v5h-13z"/>
     </g>
     <g clip-path="url(#eyelid-clip)">
-      <g class="eyelid" :class="{ 'eyelid-closed': closed }">
+      <g class="eyelid" :class="{ 'eyelid-closed': closed, 'eyelid-searching': searching }">
         <rect x="36" y="19" width="168" height="83" class="eyelid-cover"/>
         <path d="M37 59q83 44 166 0" class="eyelid-seam"/>
       </g>
@@ -82,6 +82,13 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: no-preference) {
   .eyelid { transition: transform 180ms ease-out; }
   .eyelid:not(.eyelid-closed) { animation: idle-blink 7s ease-in-out infinite; }
+
+  .eyelid.eyelid-searching:not(.eyelid-closed) { animation: search-blink 1.2s ease-in-out infinite; }
+
+  @keyframes search-blink {
+    0%, 70%, 100% { transform: translateY(-84px); }
+    85% { transform: translateY(0); }
+  }
 
   @keyframes idle-blink {
     0%, 96%, 100% { transform: translateY(-84px); }

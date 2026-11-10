@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = defineProps<{ noResults: boolean }>()
+const props = defineProps<{ noResults?: boolean }>()
 const closed = ref(false)
 watch(() => props.noResults, (noResults) => { closed.value = noResults })
 
@@ -81,5 +81,11 @@ onBeforeUnmount(() => {
 
 @media (prefers-reduced-motion: no-preference) {
   .eyelid { transition: transform 180ms ease-out; }
+  .eyelid:not(.eyelid-closed) { animation: idle-blink 7s ease-in-out infinite; }
+
+  @keyframes idle-blink {
+    0%, 96%, 100% { transform: translateY(-84px); }
+    98% { transform: translateY(0); }
+  }
 }
 </style>

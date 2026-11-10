@@ -47,6 +47,7 @@ async function saveDocument () {
 
 <template>
   <main class="archive-page">
+    <ArchiveEye />
     <p class="eyebrow">Records intake</p>
     <h1>Add a document</h1>
     <form class="card" @submit.prevent="saveDocument">

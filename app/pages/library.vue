@@ -48,6 +48,7 @@ async function removeDocument (id: string) {
 
 <template>
   <main class="archive-page">
+    <ArchiveEye />
     <p class="eyebrow">Company records</p>
     <h1>Library</h1>
     <section class="card">

@@ -73,7 +73,7 @@ jobs:
           PREVIEW_URL: ${{ steps.alias.outputs.preview_url }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
-          SHA: ${{ github.sha }}
+          SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           body_file=$(mktemp)
@@ -81,7 +81,7 @@ jobs:
             echo '<!-- doc-library-preview -->'
             echo "**Preview:** ${PREVIEW_URL}"
             echo
-            echo "Worker version alias pr-${PR_NUMBER} for commit ${SHA}. This is not a production deploy. https://doc-library.binec.workers.dev is unchanged."
+            echo "Worker version alias pr-${PR_NUMBER} for pull request head ${SHA}. This is not a production deploy. https://doc-library.binec.workers.dev is unchanged."
             echo
             echo "This preview uses the production D1 database, Vectorize index, and Worker secrets (OPENROUTER_API_KEY, SITE_PASSWORD). Uploads, deletes, and searches change production data."
           } > "$body_file"

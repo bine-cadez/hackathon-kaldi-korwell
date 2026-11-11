@@ -124,7 +124,52 @@ Zero Trust has to be enabled on the account first. Access runs before the Worker
 
 `.github/workflows/ci.yml` installs, tests, and builds on every push and pull request. It does not deploy.
 
-`.github/workflows/deploy.yml` deploys the `doc-library` Worker on push to `main` and from the Actions tab (`workflow_dispatch`). It runs `npm ci`, `npm test`, and `npm run build`, applies remote D1 migrations, then `wrangler deploy --cwd .output --keep-vars`. It does not run `npm run cf:provision`.
+`.github/workflows/deploy.yml` deploys the `doc-library` Worker on push to `main` and from the Actions tab (`workflow_dispatch`). It runs `npm ci`, `npm test`, and `npm run build`, applies remote D1 migrations, then `wrangler deploy --cwd .output --keep-vars`. It does not run `npm run cf:provision`. Production is [doc-library.binec.workers.dev](https://doc-library.binec.workers.dev).
+
+## Pull request previews
+
+`.github/workflows/preview.yml` runs on pull requests opened, updated, or reopened from a branch **in this repository**. It builds `.output` and runs:
+
+```bash
+wrangler versions upload --cwd .output --keep-vars --preview-alias pr-<number>
+```
+
+Wrangler is pinned to **4.158.0**, the same version as `deploy.yml`. The command uploads a Worker **version**. It does not deploy that version to production traffic, and it does not run `wrangler versions deploy`. [doc-library.binec.workers.dev](https://doc-library.binec.workers.dev) stays on the version `deploy.yml` last deployed.
+
+The stable preview hostname is:
+
+```text
+https://pr-<number>-doc-library.binec.workers.dev
+```
+
+`<number>` is the pull request number. Wrangler prints this as `Version Preview Alias URL`. The workflow posts that URL in one pull request comment and updates the same comment on later runs (HTML marker `<!-- doc-library-preview -->`). Each upload also gets a one-off version URL (`https://<version-prefix>-doc-library.binec.workers.dev`); the comment uses the alias, which keeps pointing at the latest upload for that PR.
+
+Fork pull requests are skipped. GitHub does not pass `CLOUDFLARE_API_TOKEN` or `CLOUDFLARE_ACCOUNT_ID` to workflows from forks, so the job never starts.
+
+This is not [`wrangler preview`](https://developers.cloudflare.com/workers/previews/) (Wrangler's separate branch environments). Those previews do not inherit production bindings or secrets. This repo uses an aliased [Version URL](https://developers.cloudflare.com/workers/versions-and-deployments/version-urls/) so the uploaded code runs with the production configuration. See [Compare workflows](https://developers.cloudflare.com/workers/previews/compare-workflows/).
+
+### Shared production data
+
+Preview versions use the **production** resources. There is no separate database, index, or secret:
+
+| Resource | Preview behavior |
+| --- | --- |
+| D1 `DB` (`doc-library`) | Same database as production. The preview workflow does **not** run migrations. |
+| Vectorize `VECTORIZE` (`doc-chunks`) | Same index as production. |
+| `OPENROUTER_API_KEY`, `SITE_PASSWORD` | Inherited from the current Worker version. The workflow does not upload, replace, or delete secrets, and it does not set the Wrangler action `secrets` input. `--keep-vars` leaves dashboard vars in place. |
+
+Saving or deleting a document on a preview URL writes production D1 and Vectorize. Search calls OpenRouter with the production key. If `SITE_PASSWORD` is set on the Worker, the preview asks for that same password. The preview hostname is still public; the password (or Cloudflare Access, if you turn it on for all traffic) is what locks it.
+
+### One-time: Version URLs
+
+`preview_urls: true` in `wrangler.jsonc` turns on workers.dev Version URLs. `versions upload` does not apply that flag. The next production deploy does. If Version URLs are already enabled (the default when this Worker's `workers.dev` route is on), previews work before that deploy.
+
+If the preview job uploads a version but fails with "did not print a Version Preview Alias URL", enable them once:
+
+1. Cloudflare dashboard → **Workers & Pages** → **doc-library** → **Settings** → **Domains & Routes**.
+2. **Version URLs** → **Enable**.
+
+No new GitHub secrets. The preview workflow uses the same `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as deploy. The token needs **Workers Scripts: Edit** (the **Edit Cloudflare Workers** template). It does not need D1 edit for previews, because this workflow does not migrate.
 
 ### GitHub secrets
 
@@ -135,11 +180,11 @@ Add these in the GitHub repo under **Settings → Secrets and variables → Acti
 | `CLOUDFLARE_API_TOKEN`  | Cloudflare API token. Use the **Edit Cloudflare Workers** template (Workers Scripts Edit). Also add **Account → D1 → Edit** so migrations can write. Scope the token to this account. |
 | `CLOUDFLARE_ACCOUNT_ID` | The account id from the Workers dashboard overview. [How to find it](https://developers.cloudflare.com/fundamentals/account/find-account-and-zone-ids/).                              |
 
-Do not add `OPENROUTER_API_KEY` as a GitHub secret for this workflow. The deploy does not pass Wrangler's secret-upload input. `--keep-vars` leaves dashboard variables in place, and Wrangler does not delete Worker secrets on deploy.
+Do not add `OPENROUTER_API_KEY` or `SITE_PASSWORD` as GitHub secrets. Neither workflow passes Wrangler's secret-upload input. `--keep-vars` leaves dashboard variables in place, and Wrangler does not delete Worker secrets on deploy or on `versions upload`.
 
 ### One-time setup before the first green deploy
 
-The workflow only uploads code and applies migrations. Create the resources and the Worker secret once, from a machine logged in with `npx wrangler login`:
+The deploy workflow only uploads code and applies migrations. Create the resources and the Worker secret once, from a machine logged in with `npx wrangler login`:
 
 ```bash
 npm run cf:provision
@@ -170,8 +215,9 @@ Other routes: `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/docum
 ## Layout
 
 ```
-.github/workflows/deploy.yml   push to main deploys the Worker
-wrangler.jsonc          D1, Vectorize,
+.github/workflows/deploy.yml    push to main deploys the Worker
+.github/workflows/preview.yml   pull requests upload a preview version
+wrangler.jsonc          D1, Vectorize, preview_urls
 public/robots.txt       disallow every crawler
 public/_headers         X-Robots-Tag on static assets
 migrations/0001_init.sql

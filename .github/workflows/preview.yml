@@ -1,0 +1,99 @@
+name: preview
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+# contents: read for checkout. pull-requests: write for the single preview comment.
+# Fork pull requests are skipped below and never receive Cloudflare credentials.
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: cloudflare-doc-library-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Upload preview version
+        id: upload
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.158.0"
+          # versions upload creates a Worker version and a pr-<number> alias.
+          # It does not deploy that version onto production traffic.
+          # Do not set the action `secrets` input. Do not run D1 migrations.
+          # --keep-vars leaves dashboard vars in place. Secrets are kept by Wrangler.
+          command: >-
+            versions upload
+            --cwd .output
+            --keep-vars
+            --preview-alias pr-${{ github.event.pull_request.number }}
+            --message "pr-${{ github.event.pull_request.number }}@${{ github.sha }}"
+      - name: Read preview alias URL
+        id: alias
+        env:
+          WRANGLER_STDOUT: ${{ steps.upload.outputs.command-output }}
+          WRANGLER_STDERR: ${{ steps.upload.outputs.command-stderr }}
+        run: |
+          set -euo pipefail
+          combined=$(printf '%s\n%s\n' "$WRANGLER_STDOUT" "$WRANGLER_STDERR" | sed -E 's/\x1b\[[0-9;]*[[:alpha:]]//g')
+          url=$(printf '%s\n' "$combined" | sed -n -E 's/.*Version Preview Alias URL: (https:\/\/[^[:space:]]+).*/\1/p')
+          url=${url%%$'\n'*}
+          if [ -z "$url" ]; then
+            echo "Wrangler did not print a Version Preview Alias URL."
+            echo "Version URLs are likely disabled for the doc-library Worker."
+            echo "Enable them under Workers & Pages → doc-library → Settings → Domains & Routes → Version URLs."
+            echo "preview_urls in wrangler.jsonc is applied by the next production deploy, not by versions upload."
+            printf '%s\n' "$combined"
+            exit 1
+          fi
+          echo "preview_url=${url}" >> "$GITHUB_OUTPUT"
+          echo "Preview: ${url}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Comment preview URL
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PREVIEW_URL: ${{ steps.alias.outputs.preview_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          body_file=$(mktemp)
+          {
+            echo '<!-- doc-library-preview -->'
+            echo "**Preview:** ${PREVIEW_URL}"
+            echo
+            echo "Worker version alias pr-${PR_NUMBER} for commit ${SHA}. This is not a production deploy. https://doc-library.binec.workers.dev is unchanged."
+            echo
+            echo "This preview uses the production D1 database, Vectorize index, and Worker secrets (OPENROUTER_API_KEY, SITE_PASSWORD). Uploads, deletes, and searches change production data."
+          } > "$body_file"
+
+          comment_id=$(
+            gh api --paginate "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+              --jq '.[] | select(.body | contains("<!-- doc-library-preview -->")) | .id'
+          )
+          comment_id=${comment_id%%$'\n'*}
+          if [ -n "${comment_id}" ]; then
+            jq -n --rawfile body "$body_file" '{body:$body}' \
+              | gh api --method PATCH "repos/${REPO}/issues/comments/${comment_id}" --input -
+          else
+            gh pr comment "${PR_NUMBER}" --body-file "$body_file"
+          fi

@@ -347,3 +347,8 @@ textarea::placeholder {
   0%, 40% { opacity: 0; }
   82%, 100% { opacity: 1; }
 }
+
+.archive-account {
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}

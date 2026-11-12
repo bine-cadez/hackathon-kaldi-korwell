@@ -16,7 +16,7 @@ interface DocumentDetail {
   chunks: Array<{ id: string, chunkIndex: number, content: string }>
 }
 
-const requestHeaders = useRequestHeaders(['cookie'])
+const requestHeaders = useRequestHeaders(['cookie', 'cf-access-jwt-assertion'])
 const { data: library, error: libraryError, refresh: refreshLibrary } = await useFetch<{ documents: LibraryDocument[] }>('/api/documents', {
   headers: requestHeaders
 })

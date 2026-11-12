@@ -1,6 +1,8 @@
 import { createError, defineEventHandler, getCookie, getHeader, getRequestURL, setHeader, setResponseStatus } from 'h3'
+import { accessConfig, verifyAccessUser } from '../utils/cloudflare-access.ts'
 import {
   decideSiteAccess,
+  isPublicRoute,
   loginFormHtml,
   normalizePathname,
   SITE_AUTH_COOKIE,
@@ -9,10 +11,37 @@ import {
 
 // Runs before route handlers so a locked upload or search never calls OpenRouter.
 export default defineEventHandler(async (event) => {
-  const sitePassword = sitePasswordFromEvent(event)
   const url = getRequestURL(event)
+  const pathname = normalizePathname(url.pathname)
+  const method = event.method.toUpperCase()
+  const access = accessConfig(event)
+
+  if (access.mode !== 'disabled') {
+    const readOnly = method === 'GET' || method === 'HEAD'
+    if (readOnly && isPublicRoute(method, pathname)) return
+    setHeader(event, 'cache-control', 'private, no-store')
+
+    if (access.mode === 'misconfigured') {
+      throw createError({ statusCode: 503, statusMessage: 'Cloudflare Access is not configured' })
+    }
+
+    const assertion = getHeader(event, 'cf-access-jwt-assertion')
+    const user = assertion ? await verifyAccessUser(assertion, access) : null
+    if (!user) throw createError({ statusCode: 401, statusMessage: 'Sign in with your Kaldi email through Cloudflare Access' })
+
+    const origin = getHeader(event, 'origin')
+    const requestOrigin = event.context.cloudflare?.url?.origin ?? event.web?.url?.origin ?? url.origin
+    if (!readOnly && ((origin && origin !== requestOrigin) || getHeader(event, 'sec-fetch-site') === 'cross-site')) {
+      throw createError({ statusCode: 403, statusMessage: 'Cross-origin request denied' })
+    }
+    if (pathname === '/api/auth/login') throw createError({ statusCode: 404 })
+
+    event.context.korwellAccessUser = user
+    return
+  }
+
   const decision = await decideSiteAccess({
-    sitePassword,
+    sitePassword: sitePasswordFromEvent(event),
     method: event.method,
     pathname: url.pathname,
     cookie: getCookie(event, SITE_AUTH_COOKIE) ?? null,
@@ -23,8 +52,6 @@ export default defineEventHandler(async (event) => {
 
   setHeader(event, 'cache-control', 'no-store')
   setHeader(event, 'x-robots-tag', 'noindex, nofollow')
-  const pathname = normalizePathname(url.pathname)
-  const method = event.method.toUpperCase()
   const pageRequest = (method === 'GET' || method === 'HEAD') && pathname !== '/api' && !pathname.startsWith('/api/')
   if (pageRequest) {
     setResponseStatus(event, 401, 'Unauthorized')

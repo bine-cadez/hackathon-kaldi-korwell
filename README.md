@@ -180,3 +180,33 @@ server/middleware/      X-Robots-Tag and the shared-password gate
 server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes
 app/pages/index.vue     paste/upload and search UI
 ```
+
+## Kaldi email sign-in with Cloudflare Access
+
+Configure Cloudflare Access on a separate Worker with sample data for the
+first test. Enable One-time PIN, allow the `kaldi.si` email domain, and protect
+all traffic for that Worker. Do not use the PR preview that shares production
+data for upload or delete testing.
+
+Set these two variables on the test Worker's deployed version:
+
+- `ACCESS_TEAM_DOMAIN`: the team's Cloudflare Access hostname, for example
+  `https://example.cloudflareaccess.com`.
+- `ACCESS_AUD`: the Application Audience (AUD) tag from the Access application
+  that protects this Worker.
+
+Cloudflare sends a signed assertion to the Worker after sign-in. Korwell
+checks its signature, issuer, audience, expiration, and exact email domain.
+It keeps the verified `sub` as the request's user ID and shows the signed-in
+email in the header. No user records or upload credits are written in this phase.
+
+With both settings blank, the existing shared-password behavior is used. A
+partial or invalid Access configuration blocks protected requests. In Access
+mode, the shared password and its cookies cannot unlock Korwell. Keep the
+shared password available for rollback until the test passes.
+
+On the test Worker, verify that a Kaldi mailbox can sign in, a personal address
+cannot, and a signed-out visitor cannot call the document or search API. Then
+apply Access to production and previews and set each deployment's audience to
+the tag of the policy protecting it. Only retire `SITE_PASSWORD` after verifying
+the live gate. No database migration is required.

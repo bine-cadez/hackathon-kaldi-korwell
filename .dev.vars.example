@@ -4,3 +4,7 @@ OPENROUTER_API_KEY=
 
 # Optional. Empty = unlocked. Production: npx wrangler secret put SITE_PASSWORD
 SITE_PASSWORD=
+
+# Optional Cloudflare Access assertion validation. Set both together.
+ACCESS_TEAM_DOMAIN=
+ACCESS_AUD=

@@ -1,6 +1,10 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "doc-library",
+  // workers.dev Version URLs, including PR aliases from `wrangler versions upload --preview-alias`.
+  // `versions upload` does not change this setting; the next `wrangler deploy` does.
+  // https://developers.cloudflare.com/workers/versions-and-deployments/version-urls/
+  "preview_urls": true,
   // Optional gate: `npx wrangler secret put SITE_PASSWORD` (unset = unlocked).
   // Do not put the password in this file. Cloudflare Access can replace the
   // in-app gate later. Wrangler has no portable Access block (it needs your

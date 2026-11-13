@@ -1,6 +1,6 @@
 # Document library
 
-Hackathon v1 of an internal document library. Someone pastes or uploads a text or markdown note. On save the app chunks it, calls OpenRouter for embeddings, stores the document and chunks in Cloudflare D1, and stores the vectors in Cloudflare Vectorize. Search embeds the query and returns the closest chunks with the source document title. After migration `0002`, search also matches title, author, and body with SQLite FTS5 and can limit results to a created-at date range.
+Hackathon v1 of an internal document library. Someone pastes or uploads a text or markdown note, or uploads a PDF, Word (`.docx`), or Excel (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`) file. Workers AI converts those files to markdown first. On save the app chunks the text, calls OpenRouter for embeddings, stores the document and chunks in Cloudflare D1, and stores the vectors in Cloudflare Vectorize. Search embeds the query and returns the closest chunks with the source document title. After migration `0002`, search also matches title, author, and body with SQLite FTS5 and can limit results to a created-at date range.
 
 Chat is not in this version. Nothing is embedded until a person uploads it.
 
@@ -11,6 +11,7 @@ A shared password (`SITE_PASSWORD`) locks HTML pages and the data APIs when it i
 - Nuxt 4 (current stable) on Nitro's `cloudflare_module` preset (Cloudflare Workers)
 - D1 (`DB`) for documents and chunks
 - Vectorize (`VECTORIZE`) for chunk vectors
+- Workers AI (`AI`) [`toMarkdown`](https://developers.cloudflare.com/workers-ai/features/markdown-conversion/) for PDF, Word, and Excel uploads
 - Embeddings: OpenRouter [`openai/text-embedding-3-small`](https://openrouter.ai/openai/text-embedding-3-small), 1536 dimensions, cosine distance ([Embeddings API](https://openrouter.ai/docs/api/api-reference/embeddings/submit-an-embedding-request))
 
 Wrangler config lives in `wrangler.jsonc` (same bindings you would put in `wrangler.toml`). Nuxt's Cloudflare preset merges that file at build time.
@@ -46,7 +47,7 @@ npm run build
 npm run preview
 ```
 
-Tests (chunking, embedding response parsing, schema drift):
+Tests (chunking, embedding response parsing, file conversion, schema drift):
 
 ```bash
 npm test
@@ -210,11 +211,32 @@ New vectors can take a few seconds to show up in search. Vectorize applies inser
 
 ## What the app does
 
-1. `POST /api/documents` with JSON `{ "title", "body", "author"? }` or multipart fields `title`, optional `author`, and `file` (or `body`). Author is optional. It is stored only when `documents.author` exists.
+1. `POST /api/documents` with JSON `{ "title", "body", "author"? }` or multipart fields `title`, optional `author`, and `file` (or `body`). Author is optional. It is stored only when `documents.author` exists. A `file` named `.pdf`, `.docx`, `.xlsx`, `.xlsm`, `.xlsb`, or `.xls` is converted to markdown with Workers AI `toMarkdown` (see [File uploads](#file-uploads)). Any other file is read as UTF-8 text. If `title` is empty, the filename without its extension is used.
 2. Split the body into chunks of about 1200 characters (max 48 chunks, max ~200k characters).
 3. `POST https://openrouter.ai/api/v1/embeddings` with `openai/text-embedding-3-small` and `dimensions: 1536`.
 4. Insert the document and chunks into D1, including the embedding JSON on `chunks.embedding` (this is what local dev searches). Upsert vectors into Vectorize (id = chunk id, metadata = document id, title, chunk index), except in local dev unless `VECTORIZE_REMOTE=true`. Triggers keep the FTS5 index in sync when it exists.
 5. `POST /api/search` with `{ "query", "topK"?, "from"?, "to"?, "title"?, "author"? }`. `from` and `to` are inclusive `YYYY-MM-DD` dates compared with the UTC timestamp in `documents.created_at`. `title` and `author` are extra keyword constraints. Deployed Workers run `VECTORIZE.query` (up to 50 hits when a filter is set, so a date or title filter can drop some of them) and join the hit ids back to D1. Local dev ranks the stored D1 embeddings with cosine similarity. When `documents_fts` exists, those vector hits are fused with the FTS5 ranking. The response includes chunk text, title, author, and `createdAt`.
+
+## File uploads
+
+`server/utils/document-file.ts` turns an uploaded file into the document body. Nothing after that step changes: the extracted markdown is chunked, embedded, and searched like a pasted note.
+
+| Upload | What happens |
+| ------ | ------------ |
+| `.md`, `.markdown`, `.txt`, or no extension | Decoded as UTF-8. A file with NUL bytes (a binary format such as `.doc` or `.pptx`) returns **415**. |
+| `.pdf`, `.docx`, `.xlsx`, `.xlsm`, `.xlsb`, `.xls` | Sent to `env.AI.toMarkdown()` with PDF metadata turned off. Spreadsheets come back as markdown tables. |
+
+Cloudflare does not charge for document conversion; only image conversion is billed, and this app does not accept images. `GET /api/health` reports `bindings.ai`.
+
+The `AI` binding is declared in `nuxt.config.ts` (`nitro.cloudflare.wrangler`), not in `wrangler.jsonc`. Nitro merges it into the generated `.output/server/wrangler.json`, so deploys, PR previews, and `npm run preview` get it. The AI binding has no local simulator. If it were in `wrangler.jsonc`, `npm run dev` would open a remote Cloudflare session at startup, and without `wrangler login` that failure also drops D1 and Vectorize. So `npm run dev` runs without it by default: text uploads work, and PDF or Office uploads return **503**. To convert files in dev, run `npx wrangler login` once, then `AI_REMOTE=true npm run dev` (or set `AI_REMOTE=true` in `.env`). `nuxt.config.ts` then writes `wrangler.jsonc` plus the AI binding to `.wrangler/dev-ai/wrangler.json` and points the dev proxy at it. D1 stays local. `npm run build && npm run preview` also has the binding.
+
+Limits and errors:
+
+- Files are capped at 10 MB (**413**). The browser checks this before it uploads.
+- The converted text still has to fit the v1 limits: about 200k characters and 48 chunks. Depending on paragraph breaks, that is roughly 35k–55k characters, often 10–20 PDF pages. A longer file returns **413** and has to be split.
+- A PDF with no text layer (a scan) converts to nothing and returns **422** `No text found`. There is no OCR.
+- If Workers AI reports a conversion error, the route returns **422** with that message. If the call itself fails, it returns **502**. If the binding is missing, it returns **503**.
+- Only the extracted text is stored. The original file is not kept.
 
 ## Keyword search and dates
 
@@ -290,9 +312,9 @@ docs/slack-app-manifest.yml
 server/api/             upload, list, search, Slack events
 server/routes/          MCP endpoint and OAuth authorize, token, register
 server/middleware/      X-Robots-Tag, the shared-password / Access gate, OAuth discovery
-server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes, FTS and date helpers, Slack archive, MCP tools
+server/utils/           file-to-markdown conversion, chunk, OpenRouter embeddings, D1/Vectorize writes, FTS and date helpers, Slack archive, MCP tools
 app/pages/index.vue     document search (date, title, author filters) and the Slack search tab
-app/pages/feed.vue      paste/upload, including optional author
+app/pages/feed.vue      paste/upload (text, PDF, Word, Excel), including optional author
 app/pages/connect.vue   MCP server URL and Claude connector setup steps
 ```
 

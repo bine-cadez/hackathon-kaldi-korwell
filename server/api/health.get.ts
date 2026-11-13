@@ -27,7 +27,8 @@ export default defineEventHandler((event) => {
     bindings: {
       db: Boolean(env?.DB),
       vectorize: Boolean(env?.VECTORIZE),
-      blob: Boolean(env?.BLOB)
+      blob: Boolean(env?.BLOB),
+      ai: Boolean(env?.AI)
     },
     slack: {
       events: Boolean(slack.signingSecret),

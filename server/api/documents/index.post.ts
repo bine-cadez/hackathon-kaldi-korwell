@@ -14,16 +14,18 @@ async function readDocumentInput (event: Parameters<typeof readBody>[0]) {
     }
     let title = ''
     let body = ''
+    let author = ''
     for (const part of parts) {
       const text = part.data.toString('utf8')
       if (part.name === 'title') title = text
+      if (part.name === 'author') author = text
       if (part.name === 'body' && !body) body = text
       if (part.name === 'file' && part.data.length > 0) {
         body = text
         if (!title && part.filename) title = part.filename.replace(/\.(md|markdown|txt)$/i, '')
       }
     }
-    return { title, body }
+    return { title, body, author }
   }
 
   const payload = await readBody(event)
@@ -34,10 +36,11 @@ async function readDocumentInput (event: Parameters<typeof readBody>[0]) {
       data: { message: 'Expected JSON { title, body }' }
     })
   }
-  const record = payload as { title?: unknown, body?: unknown }
+  const record = payload as { title?: unknown, body?: unknown, author?: unknown }
   return {
     title: typeof record.title === 'string' ? record.title : '',
-    body: typeof record.body === 'string' ? record.body : ''
+    body: typeof record.body === 'string' ? record.body : '',
+    author: typeof record.author === 'string' ? record.author : ''
   }
 }
 

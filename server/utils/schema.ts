@@ -1,3 +1,6 @@
+// Base tables only (migrations/0001_init.sql). Author and the FTS5 index live in
+// migrations/0002_document_search.sql and are not applied here: PR previews share
+// production D1 and must keep working before that migration runs.
 export const SCHEMA_SQL = `CREATE TABLE IF NOT EXISTS documents (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,

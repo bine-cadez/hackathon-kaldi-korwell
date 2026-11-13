@@ -1,6 +1,6 @@
 # Document library
 
-Hackathon v1 of an internal document library. Someone pastes or uploads a text or markdown note. On save the app chunks it, calls OpenRouter for embeddings, stores the document and chunks in Cloudflare D1, and stores the vectors in Cloudflare Vectorize. Search embeds the query and returns the closest chunks with the source document title.
+Hackathon v1 of an internal document library. Someone pastes or uploads a text or markdown note. On save the app chunks it, calls OpenRouter for embeddings, stores the document and chunks in Cloudflare D1, and stores the vectors in Cloudflare Vectorize. Search embeds the query and returns the closest chunks with the source document title. After migration `0002`, search also matches title, author, and body with SQLite FTS5 and can limit results to a created-at date range.
 
 Chat is not in this version. Nothing is embedded until a person uploads it.
 
@@ -30,11 +30,13 @@ Without a key, save and search return 503. For a click-through of chunking and s
 
 `npm run dev` uses Nitro's Cloudflare dev emulation (Miniflare). D1 is local. **Vectorize has no local simulator** in current Wrangler (the binding is remote-only), so dev search ranks the embedding JSON stored on each D1 chunk. The deployed Worker upserts and queries Vectorize. Set `VECTORIZE_REMOTE=true` in `.env` only when you want `nuxt dev` to call your real index as well (requires `wrangler login` and the index from the next section).
 
-The first request creates tables if they are missing. You can also apply the migration explicitly:
+The first request creates the base tables from `migrations/0001_init.sql` if they are missing. It does **not** add the author column or the FTS5 index. Apply both migrations for keyword search:
 
 ```bash
 npm run db:migrate:local
 ```
+
+Until `0002` is applied, save still works (an author is accepted and then dropped) and search stays vector-only. Date and title filters still apply, because `created_at` and `title` exist on the base table.
 
 Preview the production Worker bundle locally (after a build):
 
@@ -99,7 +101,7 @@ After `d1 create`, copy the printed `database_id` into `wrangler.jsonc` → `d1_
 
 Vectorize dimensions must stay **1536**. That is the default size of `openai/text-embedding-3-small` and the maximum Vectorize dimension. The index is cosine, which matches the model's normalized embeddings.
 
-Apply the remote migration before the first deploy (the Worker also runs `CREATE TABLE IF NOT EXISTS` on demand):
+Apply the remote migrations before the first deploy (the Worker also runs `CREATE TABLE IF NOT EXISTS` for the base tables on demand; author and FTS5 come only from `migrations/0002_document_search.sql`):
 
 ```bash
 npm run db:migrate:remote
@@ -204,11 +206,37 @@ New vectors can take a few seconds to show up in search. Vectorize applies inser
 
 ## What the app does
 
-1. `POST /api/documents` with JSON `{ "title", "body" }` or multipart fields `title` and `file` (or `body`).
+1. `POST /api/documents` with JSON `{ "title", "body", "author"? }` or multipart fields `title`, optional `author`, and `file` (or `body`). Author is optional. It is stored only when `documents.author` exists.
 2. Split the body into chunks of about 1200 characters (max 48 chunks, max ~200k characters).
 3. `POST https://openrouter.ai/api/v1/embeddings` with `openai/text-embedding-3-small` and `dimensions: 1536`.
-4. Insert the document and chunks into D1, including the embedding JSON on `chunks.embedding` (this is what local dev searches). Upsert vectors into Vectorize (id = chunk id, metadata = document id, title, chunk index), except in local dev unless `VECTORIZE_REMOTE=true`.
-5. `POST /api/search` with `{ "query", "topK"? }` embeds the query. Deployed Workers run `VECTORIZE.query` and join the hit ids back to D1. Local dev ranks the stored D1 embeddings with cosine similarity. Either way the response includes chunk text and the source title.
+4. Insert the document and chunks into D1, including the embedding JSON on `chunks.embedding` (this is what local dev searches). Upsert vectors into Vectorize (id = chunk id, metadata = document id, title, chunk index), except in local dev unless `VECTORIZE_REMOTE=true`. Triggers keep the FTS5 index in sync when it exists.
+5. `POST /api/search` with `{ "query", "topK"?, "from"?, "to"?, "title"?, "author"? }`. `from` and `to` are inclusive `YYYY-MM-DD` dates compared with the UTC timestamp in `documents.created_at`. `title` and `author` are extra keyword constraints. Deployed Workers run `VECTORIZE.query` (up to 50 hits when a filter is set, so a date or title filter can drop some of them) and join the hit ids back to D1. Local dev ranks the stored D1 embeddings with cosine similarity. When `documents_fts` exists, those vector hits are fused with the FTS5 ranking. The response includes chunk text, title, author, and `createdAt`.
+
+## Keyword search and dates
+
+`migrations/0002_document_search.sql` adds:
+
+- `documents.author` (nullable text)
+- `documents_fts`, an FTS5 index of `title`, `author`, and `body` using `unicode61 remove_diacritics 2`, so `č`/`š`/`ž` match `c`/`s`/`z` in both the stored text and the query
+- insert, update, and delete triggers, plus a backfill of rows that already exist
+
+Search builds a quoted FTS expression (user text is not passed through as raw FTS syntax). Vector rank and keyword rank are combined with reciprocal rank fusion (`1 / (60 + rank)`). An exact title, author, or phrase hit therefore ranks with the semantic hits. If FTS returns nothing, or the FTS table is not there yet, the response is the vector ranking unchanged, including the original similarity scores.
+
+Date filtering is done in D1 on `documents.created_at` after the vector query returns. It does not require a Vectorize metadata index or a re-upsert of existing vectors. `to` covers the whole UTC day (`created_at <` the next date).
+
+PR preview versions share production D1 and do not run migrations. Before `0002` is applied, the new code does not select or insert `author` and does not query `documents_fts`, so upload and search do not 500. Author-only search returns no keyword hits until the index exists. A normal query still uses vectors. Title text and the date range still filter, because those columns are in `0001`.
+
+`server/utils/fts.ts` builds MATCH expressions and fuses ranked lists. A later Slack archive can reuse it; this change does not add Slack.
+
+Try it locally after `npm run db:migrate:local`:
+
+```bash
+npx wrangler d1 execute DB --local --command "INSERT INTO documents (id, title, body, author, r2_key, created_at) VALUES ('doc-cokolada', 'Čokolada', 'Recept za štrudelj.', 'Maja Župan', NULL, '2024-05-01T08:00:00.000Z');"
+npx wrangler d1 execute DB --local --command "SELECT document_id, title, author FROM documents_fts WHERE documents_fts MATCH 'cokolada';"
+npx wrangler d1 execute DB --local --command "SELECT document_id, author FROM documents_fts WHERE documents_fts MATCH 'author : \"zupan\"';"
+```
+
+`cokolada` and `zupan` find the row with the carons. A search limited to `from=2024-06-01` does not.
 
 Other routes: `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/documents/:id`, `GET /api/health`. With `SITE_PASSWORD` set, direct calls to the document and search routes return 401 before any embedding request. Health stays public. `POST /api/auth/login` checks the password and sets the cookie.
 
@@ -221,10 +249,12 @@ wrangler.jsonc          D1, Vectorize, preview_urls
 public/robots.txt       disallow every crawler
 public/_headers         X-Robots-Tag on static assets
 migrations/0001_init.sql
+migrations/0002_document_search.sql   author column and FTS5
 server/api/             upload, list, search
 server/middleware/      X-Robots-Tag and the shared-password gate
-server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes
-app/pages/index.vue     paste/upload and search UI
+server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes, FTS helpers
+app/pages/index.vue     search UI, including date, title, and author filters
+app/pages/feed.vue      paste/upload, including optional author
 ```
 
 ## Kaldi email sign-in with Cloudflare Access

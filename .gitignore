@@ -28,3 +28,6 @@ logs
 
 # Wrangler local state
 .wrangler
+
+# Local Kaldi font preview assets
+/public/kaldi-fonts/

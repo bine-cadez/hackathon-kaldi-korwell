@@ -1,6 +1,7 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2026-11-05',
+  experimental: { viewTransition: true },
   devtools: { enabled: false },
   css: ['~/assets/main.css'],
   vite: {

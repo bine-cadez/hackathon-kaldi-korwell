@@ -2,6 +2,7 @@
 import { useQuery, useQueryCache } from '@pinia/colada'
 import { useDeleteDocumentMutation } from '~/mutations/documents'
 import { DOCUMENT_QUERY_KEYS, documentByIdQuery, type DocumentPage, type LibraryDocument } from '~/queries/documents'
+import { renderDocumentMarkdown } from '~/utils/documentMarkdown'
 import { formatFileSize } from '~/utils/libraryFilters'
 
 // One page per document: /library/<id>, shown in the Library's reader pane.
@@ -41,6 +42,8 @@ const fileLabel = computed(() => {
   const size = formatFileSize(source.size)
   return size ? `${source.filename}, ${size}` : source.filename
 })
+
+const bodyHtml = computed(() => renderDocumentMarkdown(document.value?.body ?? ''))
 
 const { mutateAsync: deleteDocument, error: deleteError, isLoading: deleting, reset: dismissDeleteError } = useDeleteDocumentMutation()
 async function removeDocument ({ confirmFirst = true } = {}) {
@@ -116,7 +119,8 @@ async function removeDocument ({ confirmFirst = true } = {}) {
         @dismiss="dismissDeleteError()"
       />
 
-      <pre class="m-0 mt-6 max-w-[42rem] font-sans text-lg leading-relaxed font-light break-words whitespace-pre-wrap">{{ document.body }}</pre>
+      <!-- Escaped and link-checked by renderDocumentMarkdown, so v-html is safe here. -->
+      <div class="document-body mt-6 max-w-[42rem]" v-html="bodyHtml" />
     </template>
 
     <template v-else-if="isPending">

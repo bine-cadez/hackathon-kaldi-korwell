@@ -134,27 +134,13 @@ async function hydrateVectorMatches (
   const byId = new Map(results.map(row => [row.id, row]))
   const ordered: SearchMatch[] = []
   for (const match of matches) {
+    // D1 is the source of truth. A vector without a chunk row belongs to a
+    // deleted document (Vectorize deletes apply asynchronously, and a library
+    // reset cannot reach vectors D1 never knew about), so it is not a result.
     const row = byId.get(match.id)
-    if (row) {
-      if (!passesText(row.title, row.author, titleFilter, authorFilter, caps)) continue
-      ordered.push(toMatch(row, match.score))
-      continue
-    }
-    if (range.from || range.toExclusive) continue
-    if (ftsTokens(authorFilter).length > 0 && caps.author) continue
-    const metadata = match.metadata ?? {}
-    const fallback: SearchMatch = {
-      chunkId: match.id,
-      documentId: String(metadata.documentId || ''),
-      title: String(metadata.title || 'Untitled'),
-      author: null,
-      createdAt: null,
-      chunkIndex: Number(metadata.chunkIndex ?? 0),
-      content: '',
-      score: match.score
-    }
-    if (!passesText(fallback.title, fallback.author, titleFilter, authorFilter, caps)) continue
-    ordered.push(fallback)
+    if (!row) continue
+    if (!passesText(row.title, row.author, titleFilter, authorFilter, caps)) continue
+    ordered.push(toMatch(row, match.score))
   }
   return ordered
 }

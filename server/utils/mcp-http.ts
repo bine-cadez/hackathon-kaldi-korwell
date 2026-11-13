@@ -1,6 +1,6 @@
 import { defineEventHandler, getHeader, readRawBody, setResponseHeader, setResponseHeaders, setResponseStatus } from 'h3'
 import { publicRequestURL } from './mcp-request.ts'
-import { signingKeyBytes, verifyAccessToken, wwwAuthenticate } from './mcp-auth.ts'
+import { signingKeyProblem, verifyAccessToken, wwwAuthenticate } from './mcp-auth.ts'
 import { handleJsonRpc, type LibraryApi } from './mcp-protocol.ts'
 
 const BODY_LIMIT = 1_000_000
@@ -90,10 +90,11 @@ export function createMcpHandler (deps: McpHandlerDeps) {
     }
 
     const secret = deps.signingKey(event)
-    if (!signingKeyBytes(secret)) {
+    const keyProblem = signingKeyProblem(secret)
+    if (keyProblem) {
       setResponseStatus(event, 503)
       setResponseHeader(event, 'content-type', 'application/json; charset=utf-8')
-      return { error: 'server_error', error_description: 'MCP_SIGNING_KEY is not set' }
+      return { error: 'server_error', error_description: keyProblem }
     }
 
     const token = bearerToken(getHeader(event, 'authorization') ?? null)

@@ -11,7 +11,7 @@ import {
   redirectIsLoopback,
   signAuthCode,
   signConsent,
-  signingKeyBytes,
+  signingKeyProblem,
   verifyConsent,
   type McpIdentity,
   type OAuthAuthorizeParams
@@ -51,8 +51,9 @@ export interface AuthorizeResult {
 }
 
 export async function handleAuthorize (input: AuthorizeInput): Promise<AuthorizeResult> {
-  if (!signingKeyBytes(input.signingKey)) {
-    return html(503, '<p>Set the MCP_SIGNING_KEY Worker secret before connecting a client.</p>')
+  const keyProblem = signingKeyProblem(input.signingKey)
+  if (keyProblem) {
+    return html(503, `<p>${escapeHtml(keyProblem)}. Fix the Worker secret before connecting a client.</p>`)
   }
   if (input.accessMode === 'misconfigured') {
     return html(503, '<p>Cloudflare Access is not configured.</p>')
@@ -72,7 +73,7 @@ export async function handleAuthorize (input: AuthorizeInput): Promise<Authorize
     copyOAuthFields(form!, next.searchParams)
     return {
       status: 303,
-      headers: { location: next.toString(), 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' },
+      headers: { location: next.toString(), 'cache-control': 'no-store', 'referrer-policy': REFERRER_POLICY },
       body: '',
       sessionCookie: await siteSessionToken(input.sitePassword)
     }
@@ -113,7 +114,7 @@ export async function handleAuthorize (input: AuthorizeInput): Promise<Authorize
   if (input.method === 'POST' && intent === 'allow') {
     const csrf = form?.get('csrf') ?? ''
     if (!await verifyConsent(input.signingKey, user.id, parsed, csrf)) {
-      return html(400, consentPage(input.url.origin, user, parsed, await signConsent(input.signingKey, user.id, parsed), 'The confirmation expired. Review the connection and try again.'))
+      return html(400, consentPage(input.url.origin, user, parsed, await signConsent(input.signingKey, user.id, parsed), 'The confirmation expired. Review the connection and try again.'), parsed.redirectUri)
     }
     const code = await signAuthCode(input.signingKey, input.url.origin, user, parsed)
     console.log(JSON.stringify({ message: 'mcp_authorize', email: user.email, client: clientLabel(parsed.redirectUri) }))
@@ -121,7 +122,7 @@ export async function handleAuthorize (input: AuthorizeInput): Promise<Authorize
   }
 
   if (input.method !== 'GET' && input.method !== 'HEAD') return html(405, '<p>Method not allowed.</p>')
-  return html(200, consentPage(input.url.origin, user, parsed, await signConsent(input.signingKey, user.id, parsed), ''))
+  return html(200, consentPage(input.url.origin, user, parsed, await signConsent(input.signingKey, user.id, parsed), ''), parsed.redirectUri)
 }
 
 async function resolveUser (input: AuthorizeInput): Promise<McpIdentity | null> {
@@ -134,6 +135,22 @@ async function resolveUser (input: AuthorizeInput): Promise<McpIdentity | null> 
   }
   if (input.dev) return { id: 'local-dev', email: 'dev@localhost' }
   return null
+}
+
+// Must send the Origin on same-origin POSTs. With no-referrer, Chrome sends
+// `Origin: null` for the Allow/Deny form and the cross-origin check rejects it.
+// same-origin still sends nothing to Claude, ChatGPT, or a loopback client.
+export const REFERRER_POLICY = 'same-origin'
+
+// Chrome applies form-action to the redirect after a form POST, so the
+// consent page must also allow the validated client redirect origin.
+export function formActionSources (redirectUri?: string): string {
+  const sources = ["'self'"]
+  if (redirectUri && redirectAllowed(redirectUri)) {
+    const target = new URL(redirectUri).origin
+    if (/^https?:\/\/[A-Za-z0-9.[\]:-]+$/.test(target)) sources.push(target)
+  }
+  return sources.join(' ')
 }
 
 function crossSite (input: AuthorizeInput): boolean {
@@ -234,15 +251,15 @@ function page (title: string, body: string): string {
 </html>`
 }
 
-function html (status: number, body: string): AuthorizeResult {
+function html (status: number, body: string, redirectUri?: string): AuthorizeResult {
   return {
     status,
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': 'no-store',
-      'referrer-policy': 'no-referrer',
+      'referrer-policy': REFERRER_POLICY,
       'x-robots-tag': 'noindex, nofollow',
-      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'"
+      'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; form-action ${formActionSources(redirectUri)}; base-uri 'none'; frame-ancestors 'none'`
     },
     body: body.startsWith('<!DOCTYPE') ? body : page('Korwell', body)
   }
@@ -254,7 +271,7 @@ function redirect (location: string, status: number): AuthorizeResult {
     headers: {
       location,
       'cache-control': 'no-store',
-      'referrer-policy': 'no-referrer',
+      'referrer-policy': REFERRER_POLICY,
       'x-robots-tag': 'noindex, nofollow'
     },
     body: ''

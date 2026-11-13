@@ -274,10 +274,19 @@ function errorStatus (error: unknown): number | null {
   return typeof status === 'number' ? status : null
 }
 
-function publicMessage (error: unknown, secret: string): string {
+// For logs only. Never returned to the MCP client.
+function logMessage (error: unknown, secret: string): string {
   const message = error instanceof Error ? error.message : 'Request failed'
   const redacted = secret ? message.split(secret).join('[redacted]') : message
   return redacted.slice(0, 300)
+}
+
+// Fixed text per status, so upstream errors (OpenRouter, D1, Vectorize) never
+// reach the client.
+function clientMessage (status: number | null): string {
+  if (status === 404) return 'Document not found'
+  if (status === 400) return 'Invalid arguments. Check the query, the id, and that dates use YYYY-MM-DD.'
+  return 'The document library could not complete this request. Try again later.'
 }
 
 export async function callTool (
@@ -336,12 +345,13 @@ export async function callTool (
       console.log(JSON.stringify({ message: 'mcp_tool', tool: 'search_slack', queryChars: query.length, matches: results.length }))
       return toolSuccess({ results })
     }
-    return toolFailure(`Unknown tool: ${name}`)
+    return toolFailure('Unknown tool')
   } catch (error) {
     const status = errorStatus(error)
-    if (status === 400 || status === 404) return toolFailure(publicMessage(error, apiKey))
-    console.error(JSON.stringify({ message: 'mcp_tool_failed', tool: name, error: publicMessage(error, apiKey) }))
-    return toolFailure(publicMessage(error, apiKey))
+    if (status !== 400 && status !== 404) {
+      console.error(JSON.stringify({ message: 'mcp_tool_failed', tool: name, status, error: logMessage(error, apiKey) }))
+    }
+    return toolFailure(clientMessage(status))
   }
 }
 
@@ -375,7 +385,13 @@ export async function handleJsonRpc (
   if (message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
     return { status: 400, body: rpcError(message.id ?? null, -32600, 'Invalid JSON-RPC request') }
   }
-  const protocolVersion = negotiateProtocol(headerVersion)
+  // Streamable HTTP: an invalid or unsupported MCP-Protocol-Version is a 400.
+  // A missing header falls back to the default version.
+  const requestedVersion = (headerVersion ?? '').trim()
+  if (requestedVersion && !(PROTOCOL_VERSIONS as readonly string[]).includes(requestedVersion)) {
+    return { status: 400, body: rpcError(message.id ?? null, -32600, `Unsupported MCP-Protocol-Version. Supported: ${PROTOCOL_VERSIONS.join(', ')}`) }
+  }
+  const protocolVersion = negotiateProtocol(requestedVersion || null)
   if (message.id === undefined) {
     return { status: 202, body: null }
   }

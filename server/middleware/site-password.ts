@@ -16,11 +16,18 @@ export default defineEventHandler(async (event) => {
   const pathname = normalizePathname(url.pathname)
   const method = event.method.toUpperCase()
 
+  const access = accessConfig(event)
+
   // Claude and ChatGPT call these from their own servers. The handlers require
   // an OAuth bearer token (or, for discovery, return public metadata).
-  if (isMcpMachineRoute(method, pathname)) return
-
-  const access = accessConfig(event)
+  // A half-configured Access setup fails closed here too, same as /api.
+  if (isMcpMachineRoute(method, pathname)) {
+    if (access.mode === 'misconfigured') {
+      setHeader(event, 'cache-control', 'no-store')
+      throw createError({ statusCode: 503, statusMessage: 'Cloudflare Access is not configured' })
+    }
+    return
+  }
   // Password mode renders the OAuth screen itself so the query string is kept.
   // Access mode still requires a verified assertion below. Do not Bypass /authorize.
   if (access.mode === 'disabled' && pathname === '/authorize') return

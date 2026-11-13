@@ -2,6 +2,7 @@ import { defineEventHandler, readBody, setResponseHeader, setResponseHeaders, se
 import { publicRequestURL } from '../utils/mcp-request.ts'
 import { exchangeToken, mcpSigningKeyFromEvent, OAuthError } from '../utils/mcp-auth.ts'
 import { corsHeaders } from '../utils/mcp-http.ts'
+import { d1UsedCodeStore, type CodeStoreDatabase } from '../utils/mcp-code-store.ts'
 
 export default defineEventHandler(async (event) => {
   setResponseHeaders(event, {
@@ -21,7 +22,8 @@ export default defineEventHandler(async (event) => {
   }
   try {
     const body = await readBody(event)
-    const token = await exchangeToken(mcpSigningKeyFromEvent(event), publicRequestURL(event).origin, body)
+    const db = (event.context.cloudflare?.env as { DB?: CodeStoreDatabase } | undefined)?.DB
+    const token = await exchangeToken(mcpSigningKeyFromEvent(event), publicRequestURL(event).origin, body, d1UsedCodeStore(db))
     setResponseHeader(event, 'content-type', 'application/json; charset=utf-8')
     return token
   } catch (error) {

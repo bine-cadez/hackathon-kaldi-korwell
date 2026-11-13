@@ -1,4 +1,5 @@
-import { defineEventHandler, setResponseHeader, setResponseHeaders, setResponseStatus } from 'h3'
+import { createError, defineEventHandler, setResponseHeader, setResponseHeaders, setResponseStatus } from 'h3'
+import { accessConfig } from '../utils/cloudflare-access.ts'
 import { authorizationServerMetadata, protectedResourceMetadata } from '../utils/mcp-auth.ts'
 import { publicRequestURL } from '../utils/mcp-request.ts'
 import { isOAuthDiscoveryPath } from '../utils/mcp-routes.ts'
@@ -7,6 +8,11 @@ import { isOAuthDiscoveryPath } from '../utils/mcp-routes.ts'
 export default defineEventHandler((event) => {
   const url = publicRequestURL(event)
   if (!isOAuthDiscoveryPath(url.pathname)) return
+
+  // Do not advertise an authorization server that will refuse every request.
+  if (accessConfig(event).mode === 'misconfigured') {
+    throw createError({ statusCode: 503, statusMessage: 'Cloudflare Access is not configured' })
+  }
 
   const method = event.method.toUpperCase()
   setResponseHeaders(event, {

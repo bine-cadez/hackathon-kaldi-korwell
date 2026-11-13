@@ -57,6 +57,19 @@ export function signingKeyBytes (secret: string): Uint8Array | null {
   return new TextEncoder().encode(secret)
 }
 
+// Why the key cannot be used, or null when it is fine. Never echoes the key.
+export function signingKeyProblem (secret: string): string | null {
+  if (!secret) return 'MCP_SIGNING_KEY is not set'
+  if (secret.length < MIN_SIGNING_KEY_LENGTH) return `MCP_SIGNING_KEY is too short. Use at least ${MIN_SIGNING_KEY_LENGTH} characters`
+  return null
+}
+
+function assertSigningKey (secret: string): Uint8Array {
+  const key = signingKeyBytes(secret)
+  if (!key) throw new OAuthError(503, 'server_error', signingKeyProblem(secret) ?? 'MCP_SIGNING_KEY is not set')
+  return key
+}
+
 export function issuerFor (origin: string): string {
   return origin.replace(/\/$/, '')
 }
@@ -105,7 +118,7 @@ export function redirectAllowed (value: string): boolean {
     return false
   }
   if (url.username || url.password || url.hash || url.search) return false
-  if (url.protocol === 'https:' && url.hostname === 'claude.ai' && url.pathname === '/api/mcp/auth_callback') return true
+  if (url.protocol === 'https:' && (url.hostname === 'claude.ai' || url.hostname === 'claude.com') && url.pathname === '/api/mcp/auth_callback') return true
   if (url.protocol === 'https:' && url.hostname === 'chatgpt.com' && url.pathname === '/connector_platform_oauth_redirect') return true
   if (url.protocol === 'https:' && url.hostname === 'chatgpt.com' && /^\/connector\/oauth\/[A-Za-z0-9_-]{1,128}$/.test(url.pathname)) return true
   const loopback = url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]' || url.hostname === '::1')
@@ -125,7 +138,7 @@ export function redirectIsLoopback (value: string): boolean {
 export function clientLabel (redirectUri: string): string {
   try {
     const host = new URL(redirectUri).hostname
-    if (host === 'claude.ai') return 'Claude'
+    if (host === 'claude.ai' || host === 'claude.com') return 'Claude'
     if (host === 'chatgpt.com') return 'ChatGPT'
     if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return 'a local app'
     return host
@@ -194,17 +207,20 @@ export function authorizeSuccessRedirect (redirectUri: string, issuer: string, c
   return url.toString()
 }
 
-async function signToken (secret: string, typ: string, subject: string, issuer: string, audience: string, ttlSeconds: number, claims: Record<string, string>): Promise<string> {
-  const key = signingKeyBytes(secret)
-  if (!key) throw new OAuthError(503, 'server_error', 'MCP_SIGNING_KEY is not set')
-  const now = Math.floor(Date.now() / 1000)
+function nowSeconds (): number {
+  return Math.floor(Date.now() / 1000)
+}
+
+// expiresAt is an absolute Unix time, so a refresh can never push it later.
+async function signToken (secret: string, typ: string, subject: string, issuer: string, audience: string, expiresAt: number, claims: Record<string, string | number>): Promise<string> {
+  const key = assertSigningKey(secret)
   return new SignJWT(claims)
     .setProtectedHeader({ alg: 'HS256', typ })
     .setIssuer(issuer)
     .setAudience(audience)
     .setSubject(subject)
-    .setIssuedAt(now)
-    .setExpirationTime(now + ttlSeconds)
+    .setIssuedAt(nowSeconds())
+    .setExpirationTime(expiresAt)
     .setJti(crypto.randomUUID())
     .sign(key)
 }
@@ -212,8 +228,10 @@ async function signToken (secret: string, typ: string, subject: string, issuer: 
 export async function signAuthCode (secret: string, origin: string, user: McpIdentity, params: OAuthAuthorizeParams): Promise<string> {
   const issuer = issuerFor(origin)
   const resource = resourceFor(origin)
-  return signToken(secret, 'mcp-code', user.id, issuer, resource, AUTH_CODE_TTL_SECONDS, {
+  return signToken(secret, 'mcp-code', user.id, issuer, resource, nowSeconds() + AUTH_CODE_TTL_SECONDS, {
     email: user.email,
+    // When the user approved in the browser. Caps the whole refresh chain.
+    auth_time: nowSeconds(),
     client_id: params.clientId,
     redirect_uri: params.redirectUri,
     code_challenge: params.codeChallenge,
@@ -222,8 +240,7 @@ export async function signAuthCode (secret: string, origin: string, user: McpIde
 }
 
 async function verifyTypedToken (token: string, secret: string, origin: string, typ: string) {
-  const key = signingKeyBytes(secret)
-  if (!key) throw new OAuthError(503, 'server_error', 'MCP_SIGNING_KEY is not set')
+  const key = assertSigningKey(secret)
   try {
     const { payload } = await jwtVerify(token, key, {
       algorithms: ['HS256'],
@@ -264,23 +281,47 @@ export async function pkceMatches (verifier: string, challenge: string): Promise
   return secretsMatch(actual, challenge)
 }
 
-function tokenResponse (accessToken: string, refreshToken: string, scope: string) {
+function tokenResponse (accessToken: string, refreshToken: string, scope: string, expiresIn: number) {
   return {
     access_token: accessToken,
     token_type: 'Bearer',
-    expires_in: ACCESS_TOKEN_TTL_SECONDS,
+    expires_in: expiresIn,
     refresh_token: refreshToken,
     scope
   }
 }
 
-async function issuePair (secret: string, origin: string, user: McpIdentity, clientId: string, scope: string) {
+// The refresh chain ends at auth_time + 30 days no matter how often it is
+// refreshed. Access tokens never outlive that cap either.
+export function refreshChainEnd (authTime: number): number {
+  return authTime + REFRESH_TOKEN_TTL_SECONDS
+}
+
+async function issuePair (secret: string, origin: string, user: McpIdentity, clientId: string, scope: string, authTime: number) {
   const issuer = issuerFor(origin)
   const resource = resourceFor(origin)
+  const now = nowSeconds()
+  const chainEnd = refreshChainEnd(authTime)
+  if (chainEnd <= now) throw new OAuthError(400, 'invalid_grant', 'Refresh token is invalid or expired')
+  const accessExpires = Math.min(now + ACCESS_TOKEN_TTL_SECONDS, chainEnd)
   const claims = { email: user.email, scope, client_id: clientId }
-  const accessToken = await signToken(secret, 'at+jwt', user.id, issuer, resource, ACCESS_TOKEN_TTL_SECONDS, claims)
-  const refreshToken = await signToken(secret, 'mcp-refresh', user.id, issuer, resource, REFRESH_TOKEN_TTL_SECONDS, claims)
-  return tokenResponse(accessToken, refreshToken, scope)
+  const accessToken = await signToken(secret, 'at+jwt', user.id, issuer, resource, accessExpires, claims)
+  const refreshToken = await signToken(secret, 'mcp-refresh', user.id, issuer, resource, chainEnd, { ...claims, auth_time: authTime })
+  return tokenResponse(accessToken, refreshToken, scope, accessExpires - now)
+}
+
+function authTimeOf (payload: { auth_time?: unknown, iat?: unknown }): number | null {
+  const value = payload.auth_time
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) return null
+  // A signed auth_time from the future means something is wrong. Allow clock skew.
+  if (value > nowSeconds() + 60) return null
+  return value
+}
+
+// Records an authorization code's jti so it can be redeemed once.
+// consume resolves true the first time and false for every later attempt.
+export interface UsedCodeStore {
+  consume (jti: string, expiresAt: number): Promise<boolean>
 }
 
 export function formValues (body: unknown): URLSearchParams {
@@ -295,8 +336,8 @@ export function formValues (body: unknown): URLSearchParams {
   return params
 }
 
-export async function exchangeToken (secret: string, origin: string, body: unknown): Promise<Record<string, unknown>> {
-  if (!signingKeyBytes(secret)) throw new OAuthError(503, 'server_error', 'MCP_SIGNING_KEY is not set')
+export async function exchangeToken (secret: string, origin: string, body: unknown, usedCodes: UsedCodeStore | null): Promise<Record<string, unknown>> {
+  assertSigningKey(secret)
   const params = formValues(body)
   const grant = readParam(params, 'grant_type', 64)
   const clientId = readParam(params, 'client_id', 512)
@@ -319,8 +360,15 @@ export async function exchangeToken (secret: string, origin: string, body: unkno
     if (!await pkceMatches(verifier, challenge)) throw new OAuthError(400, 'invalid_grant', 'PKCE verification failed')
     const user = { id: String(payload.sub || ''), email: typeof payload.email === 'string' ? payload.email : '' }
     const scope = typeof payload.scope === 'string' ? payload.scope : MCP_SCOPE
-    if (!user.id || !user.email) throw new OAuthError(400, 'invalid_grant', 'Authorization code is invalid or expired')
-    return issuePair(secret, origin, user, clientId, scope)
+    const authTime = authTimeOf(payload)
+    const jti = typeof payload.jti === 'string' ? payload.jti : ''
+    const exp = typeof payload.exp === 'number' ? payload.exp : 0
+    if (!user.id || !user.email || !authTime || !jti || !exp) throw new OAuthError(400, 'invalid_grant', 'Authorization code is invalid or expired')
+    // Single use (OAuth 2.1). Checked after PKCE so someone holding only the
+    // code cannot burn it. Without storage, fail closed.
+    if (!usedCodes) throw new OAuthError(503, 'server_error', 'Authorization code storage is unavailable')
+    if (!await usedCodes.consume(jti, exp)) throw new OAuthError(400, 'invalid_grant', 'Authorization code was already used')
+    return issuePair(secret, origin, user, clientId, scope, authTime)
   }
 
   if (grant === 'refresh_token') {
@@ -331,17 +379,18 @@ export async function exchangeToken (secret: string, origin: string, body: unkno
     if (payload.client_id !== clientId) throw new OAuthError(400, 'invalid_grant', 'Refresh token does not match this client')
     const user = { id: String(payload.sub || ''), email: typeof payload.email === 'string' ? payload.email : '' }
     const scope = typeof payload.scope === 'string' ? payload.scope : MCP_SCOPE
-    if (!user.id || !user.email || !scope.split(/\s+/).includes(MCP_SCOPE)) {
+    const authTime = authTimeOf(payload)
+    if (!user.id || !user.email || !authTime || !scope.split(/\s+/).includes(MCP_SCOPE)) {
       throw new OAuthError(400, 'invalid_grant', 'Refresh token is invalid or expired')
     }
-    return issuePair(secret, origin, user, clientId, scope)
+    return issuePair(secret, origin, user, clientId, scope, authTime)
   }
 
   throw new OAuthError(400, 'unsupported_grant_type', 'grant_type must be authorization_code or refresh_token')
 }
 
 export function registerClient (secret: string, body: unknown): Record<string, unknown> {
-  if (!signingKeyBytes(secret)) throw new OAuthError(503, 'server_error', 'MCP_SIGNING_KEY is not set')
+  assertSigningKey(secret)
   if (!body || typeof body !== 'object') throw new OAuthError(400, 'invalid_client_metadata', 'JSON body is required')
   const record = body as {
     redirect_uris?: unknown

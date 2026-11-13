@@ -222,6 +222,7 @@ wrangler.jsonc          D1, Vectorize, preview_urls
 public/robots.txt       disallow every crawler
 public/_headers         X-Robots-Tag on static assets
 migrations/0001_init.sql
+migrations/0004_mcp_used_codes.sql  single-use MCP authorization codes
 server/api/             upload, list, search
 server/routes/          MCP endpoint and OAuth authorize, token, register
 server/middleware/      X-Robots-Tag, the shared-password gate, OAuth discovery
@@ -261,7 +262,7 @@ the live gate. No database migration is required.
 
 ## MCP for Claude and ChatGPT
 
-`POST /mcp` is a read-only [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports) endpoint on the same Worker. It does not add a D1 migration.
+`POST /mcp` is a read-only [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports) endpoint on the same Worker. It adds one small D1 table, `mcp_used_codes` (`migrations/0004_mcp_used_codes.sql`), so each authorization code works once. The token endpoint also creates it on first use, because PR previews share the production D1 but do not run migrations.
 
 | Tool | What it does |
 | --- | --- |
@@ -277,16 +278,18 @@ There are no write tools.
 
 Claude and ChatGPT connect from their own servers. They cannot complete the Cloudflare Access one-time PIN, and they cannot present the `site_auth` cookie. Claude's static request-header credential is a limited beta, and one shared bearer would not be tied to a person.
 
-The Worker is its own OAuth 2.1 authorization server (authorization code + S256 PKCE, dynamic client registration, refresh tokens). `@cloudflare/workers-oauth-provider` is not used: it would have to own the Worker fetch handler, and it needs a KV namespace this app does not have. Tokens are HS256 JWTs signed with `MCP_SIGNING_KEY`, so nothing new is stored in D1.
+The Worker is its own OAuth 2.1 authorization server (authorization code + S256 PKCE, dynamic client registration, refresh tokens). `@cloudflare/workers-oauth-provider` is not used: it would have to own the Worker fetch handler, and it needs a KV namespace this app does not have. Tokens are HS256 JWTs signed with `MCP_SIGNING_KEY`. The only thing stored in D1 is the id of each redeemed authorization code, until shortly after it expires.
 
-Tradeoff: a token cannot be revoked before it expires, and an authorization code can be presented more than once until it expires. Codes last 2 minutes and are useless without the PKCE verifier. Access tokens last 1 hour. Refresh tokens last 30 days and rotate on use, but the previous refresh token stays valid until it expires. Set a new `MCP_SIGNING_KEY` to invalidate every outstanding token.
+Lifetimes: an authorization code lasts 2 minutes, is useless without the PKCE verifier, and can be redeemed once. Access tokens last 1 hour. Refresh tokens get a new token on every use, but the whole chain ends 30 days after the person clicked Allow. Refreshing never moves that date, and the last access token is cut to end at the same time. After that the person approves again through Access.
+
+Tradeoff: refresh tokens are not stored, so an earlier refresh token in the chain keeps working until that same 30-day end, and a token cannot be revoked on its own. **Removing someone from Cloudflare Access does not cut off a connector they already approved until their chain ends (at most 30 days after approval).** To cut everyone off immediately, set a new `MCP_SIGNING_KEY`.
 
 Who may connect:
 
 1. The browser step `GET /authorize` stays behind Cloudflare Access (or `SITE_PASSWORD` when Access is off). Only a Kaldi email that passes Access, or someone who knows the site password, can approve a client.
 2. `/mcp` accepts only an access token from that approval. A missing or bad token is **401** with `WWW-Authenticate` pointing at the protected-resource metadata, which is what Claude and ChatGPT use to start sign-in.
-3. If `MCP_SIGNING_KEY` is unset or shorter than 32 characters, `/mcp`, `/token`, `/register`, and `/authorize` return **503**. They do not fall open.
-4. Redirect URIs are allowlisted: `https://claude.ai/api/mcp/auth_callback`, `https://chatgpt.com/connector_platform_oauth_redirect`, `https://chatgpt.com/connector/oauth/<id>`, and loopback `http://localhost` or `http://127.0.0.1` `/callback` (any port) for Claude Code. The consent page names the redirect host and warns on loopback.
+3. If `MCP_SIGNING_KEY` is unset or shorter than 32 characters, `/mcp`, `/token`, `/register`, and `/authorize` return **503**. They do not fall open. If Access is half-configured (only one of `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD`), the MCP, OAuth, and discovery routes return **503** too, like `/api`.
+4. Redirect URIs are allowlisted: `https://claude.ai/api/mcp/auth_callback`, `https://claude.com/api/mcp/auth_callback`, `https://chatgpt.com/connector_platform_oauth_redirect`, `https://chatgpt.com/connector/oauth/<id>`, and loopback `http://localhost` or `http://127.0.0.1` `/callback` (any port) for Claude Code. The consent page names the redirect host and warns on loopback. It sends `Referrer-Policy: same-origin` (so the browser sends a real `Origin` on Allow and Deny) and a CSP `form-action` of `'self'` plus the validated redirect origin (so the browser may follow the redirect back to the client).
 
 Discovery (no token):
 

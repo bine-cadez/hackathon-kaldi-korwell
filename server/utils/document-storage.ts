@@ -54,10 +54,18 @@ export function toSourceFile (file: { filename?: string, data: Uint8Array }): So
 }
 
 // RFC 6266: an ASCII fallback plus the UTF-8 name, so "Poročilo.pdf" downloads intact.
-export function contentDisposition (filename: string): string {
+// `inline` lets the reader show a PDF in the browser's own viewer. Only PDFs
+// qualify: any other file (an uploaded .html or .svg, say) is always an
+// attachment, so it can never render as a page on this origin.
+export function contentDisposition (filename: string, { inline = false } = {}): string {
   const fallback = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
   const encoded = encodeURIComponent(filename).replace(/['()*]/g, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`
+  const type = inline && isInlineSource(filename) ? 'inline' : 'attachment'
+  return `${type}; filename="${fallback}"; filename*=UTF-8''${encoded}`
+}
+
+export function isInlineSource (filename: string): boolean {
+  return fileExtension(filename) === 'pdf'
 }
 
 // Removes every object under documents/<id>/, plus any older key that lived elsewhere.

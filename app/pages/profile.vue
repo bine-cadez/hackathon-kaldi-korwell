@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useQuery } from '@pinia/colada'
+import { useResetLibraryMutation, type LibraryResetResult } from '~/mutations/documents'
 import { documentListQuery, documentPath } from '~/queries/documents'
 import { DEFAULT_LIBRARY_FILTERS, libraryRouteQuery } from '~/utils/libraryFilters'
 
@@ -18,6 +19,19 @@ const { data: uploads, error: uploadsError, refetch: retryUploads } = useQuery((
   enabled: Boolean(email.value)
 }))
 const allUploadsLink = computed(() => ({ path: '/library', query: libraryRouteQuery({ ...DEFAULT_LIBRARY_FILTERS, uploadedBy: email.value ?? '' }) }))
+
+// Demo reset: deletes every document in the library, not just yours.
+const { mutateAsync: resetLibrary, error: resetError, isLoading: resetting, reset: dismissResetError } = useResetLibraryMutation()
+const resetResult = ref<LibraryResetResult | null>(null)
+async function onReset ({ confirmFirst = true } = {}) {
+  if (confirmFirst && window.prompt('This deletes every document, its search index, and its files for everyone. Type RESET to continue.')?.trim() !== 'RESET') return
+  resetResult.value = null
+  try {
+    resetResult.value = await resetLibrary()
+  } catch {
+    // Shown from `resetError`.
+  }
+}
 
 const signingOut = ref(false)
 function onSignOut () {
@@ -99,6 +113,37 @@ function onSignOut () {
             :label="`See all ${uploads.total} in the Library`"
           />
         </template>
+      </div>
+    </section>
+
+    <section class="studio-section border-t border-default" aria-labelledby="profile-reset">
+      <h2 id="profile-reset" class="text-[2rem] leading-tight font-light">Reset library</h2>
+      <div class="min-w-0">
+        <p class="max-w-2xl text-lg leading-relaxed">
+          Delete every document for everyone: the text, the search index, and the original files. The Slack archive, MCP connections, and settings stay. This can’t be undone.
+        </p>
+        <UButton
+          class="mt-6 uppercase"
+          color="error"
+          variant="outline"
+          icon="i-lucide-trash-2"
+          :loading="resetting"
+          :label="resetting ? 'Resetting…' : 'Reset library'"
+          @click="onReset()"
+        />
+        <p v-if="resetResult" class="mt-4 text-muted" role="status">
+          Deleted {{ resetResult.documentsDeleted }} {{ resetResult.documentsDeleted === 1 ? 'document' : 'documents' }} and {{ resetResult.filesDeleted }} {{ resetResult.filesDeleted === 1 ? 'file' : 'files' }}.
+          <template v-if="resetResult.storage === 'failed'">Some files could not be removed from storage; the library is still empty.</template>
+        </p>
+        <ErrorState
+          v-if="resetError"
+          :error="resetError"
+          title="Couldn’t reset the library"
+          compact
+          :retrying="resetting"
+          @retry="onReset({ confirmFirst: false })"
+          @dismiss="dismissResetError()"
+        />
       </div>
     </section>
   </main>

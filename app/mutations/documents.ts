@@ -87,3 +87,20 @@ export function useDeleteDocumentMutation () {
     onSettled: () => invalidateLists(queryCache)
   })
 }
+
+export interface LibraryResetResult {
+  documentsDeleted: number
+  chunksDeleted: number
+  filesDeleted: number
+  storage: 'cleared' | 'skipped' | 'failed'
+}
+
+// Wipes every uploaded document (D1, Vectorize, R2) for a fresh demo.
+export function useResetLibraryMutation () {
+  const queryCache = useQueryCache()
+  return useMutation({
+    mutation: () => $fetch<LibraryResetResult>('/api/admin/reset', { method: 'POST', body: { confirm: 'RESET' } }),
+    // Every list, facet, and document page is now stale.
+    onSettled: () => queryCache.invalidateQueries({ key: DOCUMENT_QUERY_KEYS.root })
+  })
+}

@@ -34,22 +34,20 @@ const fieldSize = ref({ width: 1200, height: 900 })
 const source = ref({ x: 50, y: 0 })
 const formBox = ref({ x: 0, y: 0, width: 0, height: 0 })
 const borderEyes = [
-  { side: 'top', position: 0.19, angle: -19 },
-  { side: 'top', position: 0.77, angle: 14 },
-  { side: 'left', position: 0.22, angle: 16 },
-  { side: 'right', position: 0.36, angle: -12 },
-  { side: 'left', position: 0.76, angle: -16 },
-  { side: 'right', position: 0.84, angle: 18 },
-  { side: 'bottom', position: 0.65, angle: -13 }
+  { side: 'top', position: 0.27, angle: -16, width: 36, opacity: 0.52 },
+  { side: 'left', position: 0.29, angle: 13, width: 34, opacity: 0.42 },
+  { side: 'right', position: 0.47, angle: -11, width: 40, opacity: 0.55 },
+  { side: 'left', position: 0.79, angle: -18, width: 39, opacity: 0.48 },
+  { side: 'bottom', position: 0.72, angle: 12, width: 33, opacity: 0.44 }
 ] as const
 
 function borderEyePosition (eye: typeof borderEyes[number]) {
   const { x, y, width, height } = formBox.value
   switch (eye.side) {
-    case 'top': return { x: x + width * eye.position, y: y - 2 }
+    case 'top': return { x: x + width * eye.position, y: y }
     case 'bottom': return { x: x + width * eye.position, y: y + height + 2 }
-    case 'left': return { x: x - 9, y: y + height * eye.position }
-    case 'right': return { x: x + width + 9, y: y + height * eye.position }
+    case 'left': return { x: x - 6, y: y + height * eye.position }
+    case 'right': return { x: x + width + 6, y: y + height * eye.position }
   }
 }
 
@@ -152,6 +150,8 @@ function measureField () {
   const form = props.form?.getBoundingClientRect()
   if (form) {
     formBox.value = { x: form.left - bounds.left, y: form.top - bounds.top, width: form.width, height: form.height }
+  } else {
+    formBox.value = { x: 0, y: 0, width: 0, height: 0 }
   }
   fieldSize.value = { width: bounds.width, height: bounds.height }
   if (eye) {
@@ -189,6 +189,8 @@ function borderEyeStyle (eye: typeof borderEyes[number], index: number) {
   return {
     left: x + 'px',
     top: y + 'px',
+    width: eye.width + 'px',
+    '--rest-opacity': eye.opacity,
     '--angle': eye.angle + 'deg',
     ...(phase.value === 'swallowing' ? pullStyle(x, y, eyeCount + index) : {})
   }
@@ -209,6 +211,12 @@ function uploadDelay (fillOrder: number) {
   const progress = Math.max(0, Math.min(1, (fillOrder - fill.start) / Math.max(1, fill.count - 1)))
   return progress * (uploadColorTime - eyeColorTime)
 }
+
+watch(() => props.form, (form, previousForm) => {
+  if (previousForm) observer?.unobserve(previousForm)
+  if (form) observer?.observe(form)
+  measureField()
+}, { flush: 'post' })
 
 onMounted(() => {
   measureField()
@@ -670,9 +678,8 @@ onBeforeUnmount(() => {
 }
 .border-eye {
   position: absolute;
-  width: 28px;
   height: auto;
-  opacity: 0.62;
+  opacity: var(--rest-opacity);
   transform: translate(-50%, -50%) rotate(var(--angle));
 }
 
@@ -730,7 +737,7 @@ onBeforeUnmount(() => {
 }
 
 @keyframes pull-into-eye {
-  0% { opacity: 1; }
+  0% { opacity: var(--rest-opacity, 1); }
   66% {
     opacity: 1;
     transform: translate(calc(-50% + var(--curve-x)), calc(-50% + var(--curve-y)))

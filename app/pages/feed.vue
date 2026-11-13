@@ -343,7 +343,6 @@ async function saveDocument () {
   display: flex;
   flex-direction: column;
   isolation: isolate;
-  min-height: calc(100svh - 4rem);
   overflow: clip;
 }
 .feed-with-eyes > .archive-page {

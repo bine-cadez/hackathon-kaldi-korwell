@@ -24,5 +24,6 @@ useHead({
       <span v-if="accessEmail" class="archive-account" aria-label="Signed in email">{{ accessEmail }}</span>
     </header>
     <NuxtPage />
+    <footer class="archive-disclaimer">Korwell can make mistakes. The archive is only human.</footer>
   </div>
 </template>

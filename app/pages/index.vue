@@ -316,7 +316,5 @@ function openDocument (id: string) {
         </article>
       </template>
     </section>
-
-    <p class="search-disclaimer">Korwell can make mistakes. The archive is only human.</p>
   </main>
 </template>

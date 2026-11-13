@@ -2,7 +2,7 @@
 -- unicode61 remove_diacritics 2 folds č/š/ž onto c/s/z in rows and queries.
 -- This file does not alter `documents`. It can apply before or after
 -- migrations/0002_document_search.sql.
--- Deleted messages stay in slack_messages and are removed from the FTS index.
+-- Deleted messages stay in slack_messages, including their text, and stay in the FTS index.
 
 CREATE TABLE IF NOT EXISTS slack_channels (
   channel_id TEXT PRIMARY KEY,
@@ -72,7 +72,6 @@ CREATE VIRTUAL TABLE IF NOT EXISTS slack_messages_fts USING fts5(
 
 CREATE TRIGGER IF NOT EXISTS slack_messages_fts_insert
 AFTER INSERT ON slack_messages
-WHEN NEW.deleted = 0
 BEGIN
   INSERT INTO slack_messages_fts(channel_id, ts, body, user_name, channel_name)
   VALUES (
@@ -84,9 +83,8 @@ BEGIN
   );
 END;
 
-CREATE TRIGGER IF NOT EXISTS slack_messages_fts_update_live
+CREATE TRIGGER IF NOT EXISTS slack_messages_fts_update
 AFTER UPDATE ON slack_messages
-WHEN NEW.deleted = 0
 BEGIN
   DELETE FROM slack_messages_fts WHERE channel_id = OLD.channel_id AND ts = OLD.ts;
   INSERT INTO slack_messages_fts(channel_id, ts, body, user_name, channel_name)
@@ -97,13 +95,6 @@ BEGIN
     trim(COALESCE(NEW.user_display_name, '') || ' ' || COALESCE(NEW.user_real_name, '')),
     COALESCE(NEW.channel_name, '')
   );
-END;
-
-CREATE TRIGGER IF NOT EXISTS slack_messages_fts_update_deleted
-AFTER UPDATE ON slack_messages
-WHEN NEW.deleted = 1
-BEGIN
-  DELETE FROM slack_messages_fts WHERE channel_id = OLD.channel_id AND ts = OLD.ts;
 END;
 
 CREATE TRIGGER IF NOT EXISTS slack_messages_fts_delete

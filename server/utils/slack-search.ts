@@ -39,6 +39,8 @@ export interface SlackSearchHit {
   threadTs: string | null
   replyCount: number | null
   editedAt: string | null
+  deleted: boolean
+  deletedAt: string | null
   subtype: string | null
   isBot: boolean
   botId: string | null
@@ -70,6 +72,8 @@ interface SearchRow {
   reply_count: number | null
   text: string
   edited_at: string | null
+  deleted: number
+  deleted_at: string | null
   subtype: string | null
   is_bot: number
   bot_id: string | null
@@ -81,7 +85,7 @@ interface SearchRow {
 }
 
 const SELECT_LIST = `m.channel_id, m.ts, m.channel_name, m.user_id, m.user_display_name, m.user_real_name,
-  m.thread_ts, m.reply_count, m.text, m.edited_at, m.subtype, m.is_bot, m.bot_id,
+  m.thread_ts, m.reply_count, m.text, m.edited_at, m.deleted, m.deleted_at, m.subtype, m.is_bot, m.bot_id,
   m.mentions, m.links, m.files, m.permalink`
 
 export async function searchSlackMessages (
@@ -113,7 +117,7 @@ export async function searchSlackMessages (
   const hasDate = range.from != null || range.toExclusive != null
   if (!match && !channelId && !userId && !hasDate) badRequest('Query is required')
 
-  const filters = ['m.deleted = 0']
+  const filters: string[] = []
   const params: Array<string | number> = []
   if (match) {
     filters.push('slack_messages_fts MATCH ?')
@@ -136,7 +140,7 @@ export async function searchSlackMessages (
     params.push(range.toExclusive)
   }
   const limit = clampLimit(input.limit)
-  const where = filters.join(' AND ')
+  const where = filters.length ? filters.join(' AND ') : '1 = 1'
   const sql = match
     ? `SELECT ${SELECT_LIST}
        FROM slack_messages AS m
@@ -177,6 +181,8 @@ export async function searchSlackMessages (
         threadTs: row.thread_ts,
         replyCount: row.reply_count,
         editedAt: row.edited_at,
+        deleted: row.deleted === 1,
+        deletedAt: row.deleted_at ?? null,
         subtype: row.subtype,
         isBot: row.is_bot === 1,
         botId: row.bot_id,
@@ -217,7 +223,7 @@ async function loadParents (db: DocDatabase, rows: SearchRow[]): Promise<Map<str
   for (const row of results) {
     parents.set(`${row.channel_id}:${row.ts}`, {
       ts: row.ts,
-      text: row.deleted ? '' : row.text,
+      text: row.text,
       userDisplayName: row.user_display_name,
       userRealName: row.user_real_name,
       deleted: row.deleted === 1

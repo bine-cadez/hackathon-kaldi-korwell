@@ -178,13 +178,11 @@ export async function storeDeletedMessage (db: DocDatabase, draft: SlackMessageD
     `UPDATE slack_messages
      SET deleted = 1,
          deleted_at = ?,
-         raw_event = ?,
          text = CASE WHEN text = '' THEN ? ELSE text END,
          updated_at = ?
      WHERE channel_id = ? AND ts = ? AND deleted = 0`
   ).bind(
     tombstone.deletedAt,
-    JSON.stringify(tombstone.rawEvent),
     tombstone.text,
     tombstone.updatedAt,
     tombstone.channelId,

@@ -223,16 +223,26 @@ test('insert, edit, delete, thread, reaction, and file events are idempotent', a
     text: 'datoteka',
     ts: '1714551200.000400'
   }))).action, 'unchanged')
-  const tombstone = sqlite.prepare('SELECT deleted, text FROM slack_messages WHERE ts = ?').get('1714551200.000400') as { deleted: number, text: string }
+  const tombstone = sqlite.prepare(
+    'SELECT deleted, deleted_at, text, edit_history FROM slack_messages WHERE ts = ?'
+  ).get('1714551200.000400') as { deleted: number, deleted_at: string | null, text: string, edit_history: string }
   assert.equal(tombstone.deleted, 1)
+  assert.ok(tombstone.deleted_at)
   assert.equal(tombstone.text, 'datoteka')
-  assert.equal(sqlite.prepare('SELECT count(*) AS n FROM slack_messages_fts WHERE ts = ?').get('1714551200.000400')?.n, 0)
+  assert.equal(sqlite.prepare('SELECT count(*) AS n FROM slack_messages_fts WHERE ts = ?').get('1714551200.000400')?.n, 1)
 
-  const found = await searchSlackMessages(db, { query: 'cokolada' })
+  const found = await searchSlackMessages(db, { query: 'datoteka' })
   assert.equal(found.configured, true)
   if (found.configured) {
-    assert.equal(found.matches.some(hit => hit.text.includes('čokolada')), true)
-    assert.equal(found.matches.some(hit => hit.text === 'datoteka'), false)
+    const deletedHit = found.matches.find(hit => hit.ts === '1714551200.000400')
+    assert.equal(deletedHit?.deleted, true)
+    assert.equal(deletedHit?.text, 'datoteka')
+    assert.ok(deletedHit?.deletedAt)
+  }
+  const kept = await searchSlackMessages(db, { query: 'cokolada' })
+  if (kept.configured) {
+    assert.equal(kept.matches.some(hit => hit.text.includes('čokolada')), true)
+    assert.equal(kept.matches.find(hit => hit.text.includes('čokolada'))?.deleted, false)
   }
   const thread = await searchSlackMessages(db, { query: 'strudelj' })
   if (thread.configured) {
@@ -268,6 +278,66 @@ test('signed retries store one row and other channels are ignored', async () => 
   assert.equal(ignored.pending.length, 0)
   const count = await first.db.prepare('SELECT count(*) AS n FROM slack_messages').first<{ n: number }>()
   assert.equal(count?.n, 1)
+})
+
+test('deleting a message keeps its text, raw event, and edit history and search flags it', async () => {
+  const { sqlite, db } = openSlackDb()
+  const client = fakeSlackClient()
+  const deps = { db, client, teamId: 'T1', now, preferPermalinkApi: true }
+  await ingestSlackCallback(deps, envelope({
+    type: 'message',
+    channel,
+    user: 'UMAJA',
+    text: 'Prvi osnutek',
+    ts: '1714555000.000100'
+  }, 'Ev-keep'))
+  await ingestSlackCallback(deps, envelope({
+    type: 'message',
+    subtype: 'message_changed',
+    channel,
+    ts: '1714555100.000100',
+    message: {
+      user: 'UMAJA',
+      text: 'Končna čokolada',
+      ts: '1714555000.000100',
+      edited: { user: 'UMAJA', ts: '1714555100.000100' }
+    },
+    previous_message: { text: 'Prvi osnutek', ts: '1714555000.000100', user: 'UMAJA' }
+  }, 'Ev-keep-edit'))
+  const before = sqlite.prepare('SELECT text, raw_event, edit_history FROM slack_messages WHERE ts = ?').get('1714555000.000100') as {
+    text: string
+    raw_event: string
+    edit_history: string
+  }
+  assert.match(before.edit_history, /Prvi osnutek/)
+  await ingestSlackCallback(deps, envelope({
+    type: 'message',
+    subtype: 'message_deleted',
+    channel,
+    ts: '1714555200.000100',
+    deleted_ts: '1714555000.000100',
+    previous_message: { text: 'Končna čokolada', ts: '1714555000.000100', user: 'UMAJA' }
+  }, 'Ev-keep-delete'))
+  const after = sqlite.prepare(
+    'SELECT deleted, deleted_at, text, raw_event, edit_history FROM slack_messages WHERE ts = ?'
+  ).get('1714555000.000100') as {
+    deleted: number
+    deleted_at: string | null
+    text: string
+    raw_event: string
+    edit_history: string
+  }
+  assert.equal(after.deleted, 1)
+  assert.equal(after.deleted_at, '2024-05-01T09:20:00.000Z')
+  assert.equal(after.text, before.text)
+  assert.equal(after.raw_event, before.raw_event)
+  assert.equal(after.edit_history, before.edit_history)
+  const found = await searchSlackMessages(db, { query: 'cokolada' })
+  if (!found.configured) throw new Error('expected archive')
+  const hit = found.matches.find(match => match.ts === '1714555000.000100')
+  assert.equal(hit?.deleted, true)
+  assert.equal(hit?.text, 'Končna čokolada')
+  assert.equal(hit?.deletedAt, '2024-05-01T09:20:00.000Z')
 })
 
 test('concurrent duplicate saves do not raise a unique constraint error', async () => {

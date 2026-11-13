@@ -19,6 +19,8 @@ interface SlackHit {
   threadTs: string | null
   replyCount: number | null
   editedAt: string | null
+  deleted: boolean
+  deletedAt: string | null
   isBot: boolean
   permalink: string | null
   parent: SlackParent | null
@@ -114,7 +116,7 @@ async function runSearch () {
           <input v-model="toDate" type="date" name="to">
         </label>
       </div>
-      <p class="meta search-filter-note">Dates include the whole day, in UTC. Deleted messages stay out of search.</p>
+      <p class="meta search-filter-note">Dates include the whole day, in UTC. Deleted messages stay in the archive and are marked deleted.</p>
     </form>
     <p v-if="queryInvalid" class="query-feedback" role="alert">Enter a search term or a channel, person, or date.</p>
     <section v-if="searched" class="search-results" aria-label="Slack results" :aria-busy="searching">
@@ -130,10 +132,11 @@ async function runSearch () {
               <span>{{ hit.channelName ? '#' + hit.channelName : hit.channelId }}</span>
               <span> · {{ when(hit) }}</span>
               <span v-if="hit.editedAt"> · edited</span>
+              <span v-if="hit.deleted"> · deleted</span>
             </p>
             <p v-if="hit.parent" class="meta">
-              In thread<span v-if="!hit.parent.deleted && hit.parent.text"> · {{ hit.parent.text }}</span>
-              <span v-else-if="hit.parent.deleted"> · parent deleted</span>
+              In thread<span v-if="hit.parent.text"> · {{ hit.parent.text }}</span>
+              <span v-if="hit.parent.deleted"> · parent deleted</span>
             </p>
             <p v-else-if="hit.replyCount" class="meta">{{ hit.replyCount }} {{ hit.replyCount === 1 ? 'reply' : 'replies' }}</p>
             <p class="chunk">{{ hit.text || 'No text.' }}</p>

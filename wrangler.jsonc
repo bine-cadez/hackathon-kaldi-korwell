@@ -14,6 +14,10 @@
   // POST /api/slack/events only. The route checks X-Slack-Signature.
   // Do not bypass /api/slack/search or /api/slack/backfill.
   // Secrets (not vars): SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN, SLACK_CHANNEL_IDS.
+  // MCP OAuth: `npx wrangler secret put MCP_SIGNING_KEY` (at least 32 characters).
+  // Do not put it in this file either. /mcp, /token, /register, and
+  // /.well-known/oauth-* must be Access Bypass paths. /authorize must stay
+  // behind Access. See the README.
   // https://developers.cloudflare.com/workers/configuration/cloudflare-access/
   "compatibility_date": "2026-11-05",
   "compatibility_flags": ["nodejs_compat"],

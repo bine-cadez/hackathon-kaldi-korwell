@@ -1,5 +1,6 @@
 import { createError, defineEventHandler, getCookie, getHeader, getRequestURL, setHeader, setResponseStatus } from 'h3'
 import { accessConfig, verifyAccessUser } from '../utils/cloudflare-access.ts'
+import { isMcpMachineRoute } from '../utils/mcp-routes.ts'
 import {
   decideSiteAccess,
   isPublicRoute,
@@ -19,7 +20,22 @@ export default defineEventHandler(async (event) => {
   // Signature verification on this route is the lock. Every other path stays gated,
   // including /api/slack/search and /api/slack/backfill.
   if (isSlackEventsRoute(method, pathname)) return
+
   const access = accessConfig(event)
+
+  // Claude and ChatGPT call these from their own servers. The handlers require
+  // an OAuth bearer token (or, for discovery, return public metadata).
+  // A half-configured Access setup fails closed here too, same as /api.
+  if (isMcpMachineRoute(method, pathname)) {
+    if (access.mode === 'misconfigured') {
+      setHeader(event, 'cache-control', 'no-store')
+      throw createError({ statusCode: 503, statusMessage: 'Cloudflare Access is not configured' })
+    }
+    return
+  }
+  // Password mode renders the OAuth screen itself so the query string is kept.
+  // Access mode still requires a verified assertion below. Do not Bypass /authorize.
+  if (access.mode === 'disabled' && pathname === '/authorize') return
 
   if (access.mode !== 'disabled') {
     const readOnly = method === 'GET' || method === 'HEAD'

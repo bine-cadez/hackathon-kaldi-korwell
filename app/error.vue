@@ -23,19 +23,18 @@ function tryAgain () {
 </script>
 
 <template>
-  <div>
-    <header class="archive-header">
-      <a class="archive-brand" href="/">The Kaldi Archive</a>
-    </header>
-    <main class="archive-page error-page">
+  <UApp>
+    <!-- A plain link: a full load leaves the error state behind. -->
+    <AppHeader external />
+    <main class="mx-auto w-[min(46rem,calc(100%-2rem))] pt-10 pb-16 text-center">
       <ArchiveEye :no-results="true" />
-      <p class="error-code">Error {{ error.statusCode }}</p>
-      <h1>{{ heading }}</h1>
-      <p class="lede">{{ lede }}</p>
-      <div class="row" style="justify-content: center">
-        <button class="primary" type="button" @click="goHome">Back to search</button>
-        <button v-if="!notFound" class="ghost" type="button" @click="tryAgain">Try again</button>
+      <p class="mt-2 text-xs font-bold tracking-[0.2em] text-muted uppercase">Error {{ error.statusCode }}</p>
+      <h1 class="text-4xl">{{ heading }}</h1>
+      <p class="mx-auto mt-3 mb-6 max-w-lg text-muted">{{ lede }}</p>
+      <div class="flex flex-wrap justify-center gap-2">
+        <UButton label="Back to search" @click="goHome" />
+        <UButton v-if="!notFound" color="neutral" variant="outline" label="Try again" @click="tryAgain" />
       </div>
     </main>
-  </div>
+  </UApp>
 </template>

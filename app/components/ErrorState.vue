@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { ButtonProps } from '@nuxt/ui'
+
 // One error block for the whole app. Pass the raw error; it picks the wording
 // and the right action (retry, reload when signed out, or nothing).
 // Listening to @retry or @dismiss shows the matching button.
@@ -30,34 +32,43 @@ const heading = computed(() => {
   return props.title && generic ? props.title : title
 })
 
-function reload () {
-  window.location.reload()
-}
+const description = computed(() => {
+  const { message } = described.value
+  return message && message !== heading.value ? message : undefined
+})
+
+const actions = computed(() => {
+  const list: ButtonProps[] = []
+  const size = props.compact ? 'xs' : 'sm'
+  if (described.value.needsSignIn) {
+    list.push({ label: 'Reload page', color: 'neutral', variant: 'outline', size, onClick: () => window.location.reload() })
+  } else if (props.onRetry && described.value.canRetry) {
+    list.push({
+      label: props.retrying ? 'Trying again…' : props.retryLabel,
+      color: 'neutral',
+      variant: 'outline',
+      size,
+      loading: props.retrying,
+      onClick: () => props.onRetry?.()
+    })
+  }
+  if (props.onDismiss) {
+    list.push({ label: 'Dismiss', color: 'neutral', variant: 'link', size, onClick: () => props.onDismiss?.() })
+  }
+  return list
+})
 </script>
 
 <template>
-  <div class="error-state" :class="{ 'error-state--compact': compact }" role="alert">
-    <svg class="error-state-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2" />
-      <path d="M12 7v6" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-      <circle cx="12" cy="16.5" r="1.2" fill="currentColor" />
-    </svg>
-    <div class="error-state-text">
-      <p class="error-state-title">{{ heading }}</p>
-      <p v-if="described.message && described.message !== heading" class="error-state-message">{{ described.message }}</p>
-    </div>
-    <div v-if="described.needsSignIn || (onRetry && described.canRetry) || onDismiss" class="error-state-actions">
-      <button v-if="described.needsSignIn" class="ghost" type="button" @click="reload">Reload page</button>
-      <button
-        v-else-if="onRetry && described.canRetry"
-        class="ghost"
-        type="button"
-        :disabled="retrying"
-        @click="onRetry()"
-      >
-        {{ retrying ? 'Trying again…' : retryLabel }}
-      </button>
-      <button v-if="onDismiss" class="error-state-dismiss" type="button" @click="onDismiss()">Dismiss</button>
-    </div>
-  </div>
+  <UAlert
+    role="alert"
+    color="error"
+    variant="subtle"
+    icon="i-lucide-circle-alert"
+    :title="heading"
+    :description="description"
+    :actions="actions"
+    :class="compact ? 'mt-3 p-3' : 'mt-3'"
+    :ui="{ title: 'font-bold', description: '[overflow-wrap:anywhere] text-muted opacity-100' }"
+  />
 </template>

@@ -53,12 +53,11 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
 </script>
 
 <template>
-  <main class="archive-page">
-    <ArchiveEye />
-    <p class="eyebrow">Company records</p>
-    <h1>Library</h1>
-    <section class="card" :aria-busy="listAsyncStatus === 'loading'">
-      <p role="status" :class="refreshing ? 'note library-status' : 'sr-only'">
+  <main class="mx-auto w-[min(46rem,calc(100%-2rem))] pt-10 pb-16">
+    <ArchiveEye class="mx-0 w-32" />
+    <PageHeading eyebrow="Company records" title="Library" />
+    <UCard as="section" :aria-busy="listAsyncStatus === 'loading'">
+      <p role="status" :class="refreshing ? 'm-0 text-sm text-muted' : 'sr-only'">
         <template v-if="!documents && !listError">Loading documents…</template>
         <template v-else-if="refreshing">Checking for new documents…</template>
       </p>
@@ -73,25 +72,34 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
       />
 
       <DocListSkeleton v-if="!documents && !listError" />
-      <div v-else-if="documents && !documents.length" class="empty-state">
-        <p class="note">No documents yet.</p>
-        <NuxtLink class="ghost button-link" to="/feed">Add the first document</NuxtLink>
-      </div>
-      <ul v-else-if="documents" class="doc-list">
-        <li v-for="document in documents" :key="document.id" :class="{ 'is-selected': selectedId === document.id }">
-          <div>
+      <UEmpty
+        v-else-if="documents && !documents.length"
+        icon="i-lucide-archive"
+        description="No documents yet."
+        :actions="[{ label: 'Add the first document', to: '/feed', icon: 'i-lucide-plus' }]"
+        variant="naked"
+      />
+      <ul v-else-if="documents" class="mt-3 grid gap-2">
+        <li
+          v-for="document in documents"
+          :key="document.id"
+          class="flex items-center justify-between gap-3 rounded-xl border p-3"
+          :class="selectedId === document.id ? 'border-primary bg-kaldi-50' : 'border-default'"
+        >
+          <div class="min-w-0">
             <button
-              class="link"
+              class="text-start font-semibold text-primary hover:underline aria-busy:cursor-progress aria-busy:opacity-70"
+              :class="{ 'font-bold underline': selectedId === document.id }"
               type="button"
               :aria-busy="selectedId === document.id && detailPending"
               @click="selectedId = document.id"
             >
               {{ document.title }}
             </button>
-            <p v-if="document.author" class="meta">{{ document.author }}</p>
+            <p v-if="document.author" class="mt-0.5 text-sm text-muted">{{ document.author }}</p>
             <DocumentProvenance :created-at="document.createdAt" :uploaded-by="document.uploadedBy" :source="document.source" />
           </div>
-          <button class="danger" type="button" @click="removeDocument(document.id)">Delete</button>
+          <UButton color="error" variant="outline" icon="i-lucide-trash-2" label="Delete" @click="removeDocument(document.id)" />
         </li>
       </ul>
       <ErrorState
@@ -103,10 +111,10 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
         @retry="removeDocument(deleteId, { confirmFirst: false })"
         @dismiss="dismissDeleteError()"
       />
-    </section>
+    </UCard>
 
-    <article v-if="selectedId && detailError" class="card">
-      <h2>{{ selectedSummary?.title ?? 'Document' }}</h2>
+    <UCard v-if="selectedId && detailError" as="article" class="mt-4">
+      <h2 class="text-2xl">{{ selectedSummary?.title ?? 'Document' }}</h2>
       <ErrorState
         :error="detailError"
         title="Couldn’t open this document"
@@ -114,25 +122,19 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
         @retry="retryDetail()"
         @dismiss="selectedId = null"
       />
-    </article>
+    </UCard>
     <template v-else-if="selectedId">
-      <article v-if="selected" ref="detailCard" class="card doc-detail">
-        <h2>{{ selected.title }}</h2>
-        <p v-if="selected.author" class="meta">{{ selected.author }}</p>
-        <DocumentProvenance :created-at="selected.createdAt" :uploaded-by="selected.uploadedBy" :source="selected.source" />
-        <pre class="body">{{ selected.body }}</pre>
-      </article>
-      <article v-else class="card" aria-busy="true">
-        <h2>{{ selectedSummary?.title ?? 'Opening document' }}</h2>
-        <p v-if="selectedSummary?.author" class="meta">{{ selectedSummary.author }}</p>
+      <div v-if="selected" ref="detailCard" class="mt-4 scroll-mt-4">
+        <UCard as="article">
+          <DocumentView :document="selected" />
+        </UCard>
+      </div>
+      <UCard v-else as="article" class="mt-4" aria-busy="true">
+        <h2 class="text-2xl">{{ selectedSummary?.title ?? 'Opening document' }}</h2>
+        <p v-if="selectedSummary?.author" class="text-sm text-muted">{{ selectedSummary.author }}</p>
         <p role="status" class="sr-only">Opening {{ selectedSummary?.title ?? 'document' }}…</p>
         <DocBodySkeleton />
-      </article>
+      </UCard>
     </template>
   </main>
 </template>
-
-<style scoped>
-.doc-list li.is-selected .link { font-weight: 700; text-decoration: underline; }
-.doc-detail { scroll-margin-top: 1rem; }
-</style>

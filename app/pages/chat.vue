@@ -45,7 +45,8 @@ const suggestions = [
 const turns = useState<ChatTurn[]>('korwell-chat', () => [])
 const draft = ref('')
 const streaming = ref(false)
-const input = ref<HTMLTextAreaElement | null>(null)
+const composer = ref<{ textareaRef: HTMLTextAreaElement | null } | null>(null)
+const input = computed(() => composer.value?.textareaRef ?? null)
 const end = ref<HTMLElement | null>(null)
 let controller: AbortController | null = null
 
@@ -243,48 +244,65 @@ onBeforeUnmount(stop)
 </script>
 
 <template>
-  <main class="chat-page" :class="{ 'chat-page--empty': !turns.length }">
-    <section v-if="!turns.length" class="chat-hero" aria-labelledby="chat-title">
-      <ArchiveEye :searching="streaming" />
+  <main class="mx-auto flex w-[min(46rem,calc(100%-2rem))] flex-col pt-6" :class="{ 'justify-center': !turns.length }">
+    <section v-if="!turns.length" class="pt-4 pb-6 text-center" aria-labelledby="chat-title">
+      <ArchiveEye class="w-[clamp(7rem,22vw,10rem)]" :searching="streaming" />
       <p class="eyebrow">Ask the archive</p>
-      <h1 id="chat-title">Korwell</h1>
-      <p class="lede">Ask anything about Kaldi’s documents and Slack. Korwell searches the archive and links every answer to its sources.</p>
+      <h1 id="chat-title" class="mb-3 text-[clamp(3.2rem,10vw,5.5rem)] leading-none text-primary">Korwell</h1>
+      <p class="mx-auto mb-6 max-w-2xl text-muted">Ask anything about Kaldi’s documents and Slack. Korwell searches the archive and links every answer to its sources.</p>
     </section>
 
-    <div v-else class="chat-toolbar">
-      <button class="ghost" type="button" @click="newChat">New chat</button>
+    <div v-else class="flex justify-end">
+      <UButton color="neutral" variant="outline" size="sm" icon="i-lucide-square-pen" label="New chat" @click="newChat" />
     </div>
 
-    <ol v-if="turns.length" class="chat-log" aria-live="polite">
-      <li v-for="(turn, index) in turns" :key="turn.id" :class="['chat-turn', `chat-turn--${turn.role}`]">
-        <p v-if="turn.role === 'user'" class="chat-question">{{ turn.text }}</p>
-        <article v-else class="chat-answer" :aria-busy="turn.status === 'streaming'">
-          <ul v-if="turn.tools.length" class="chat-tools" aria-label="What Korwell looked up">
-            <li v-for="tool in turn.tools" :key="tool.id" :class="{ 'is-pending': !tool.done, 'is-failed': tool.done && !tool.ok }">
-              <span class="chat-tool-icon" aria-hidden="true">{{ tool.name === 'fetch' ? '📄' : tool.name === 'search_slack' ? '💬' : '🔎' }}</span>
+    <ol v-if="turns.length" class="mt-4 grid gap-4" aria-live="polite">
+      <li v-for="(turn, index) in turns" :key="turn.id" :class="{ 'flex justify-end': turn.role === 'user' }">
+        <p v-if="turn.role === 'user'" class="m-0 max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 leading-snug whitespace-pre-wrap text-paper [overflow-wrap:anywhere]">{{ turn.text }}</p>
+        <article v-else class="rounded-2xl rounded-tl-sm border border-default bg-default px-4.5 py-3.5 shadow-xs" :aria-busy="turn.status === 'streaming'">
+          <ul v-if="turn.tools.length" class="mb-2.5 grid gap-1" aria-label="What Korwell looked up">
+            <li
+              v-for="tool in turn.tools"
+              :key="tool.id"
+              class="flex items-baseline gap-2 text-sm [overflow-wrap:anywhere]"
+              :class="!tool.done ? 'text-primary' : !tool.ok ? 'text-error' : 'text-muted'"
+            >
+              <UIcon
+                :name="tool.name === 'fetch' ? 'i-lucide-file-text' : tool.name === 'search_slack' ? 'i-lucide-message-square' : 'i-lucide-search'"
+                class="size-3.5 flex-none self-center"
+                :class="{ 'chat-pulse': !tool.done }"
+              />
               {{ toolLabel(tool) }}
             </li>
           </ul>
 
-          <div v-if="turn.text" class="chat-answer-body" @click="onAnswerClick" v-html="renderChatMarkdown(turn.text, sourceUrls(turn))" />
-          <p v-else-if="turn.status === 'streaming'" class="chat-thinking" role="status">
-            <span /><span /><span />
+          <div
+            v-if="turn.text"
+            class="chat-answer-body"
+            :class="{ 'border-t border-default pt-2.5': turn.tools.length }"
+            @click="onAnswerClick"
+            v-html="renderChatMarkdown(turn.text, sourceUrls(turn))"
+          />
+          <p v-else-if="turn.status === 'streaming'" class="my-1 flex gap-1.5" role="status">
+            <span class="chat-pulse size-2 rounded-full bg-orange" />
+            <span class="chat-pulse size-2 rounded-full bg-orange [animation-delay:0.15s]" />
+            <span class="chat-pulse size-2 rounded-full bg-orange [animation-delay:0.3s]" />
             <span class="sr-only">Korwell is thinking…</span>
           </p>
 
-          <div v-if="turn.status !== 'streaming' && citedSources(turn).length" class="chat-sources">
-            <p class="eyebrow">Sources</p>
-            <ul>
-              <li v-for="source in citedSources(turn)" :key="source.url">
-                <span class="chat-source-kind">{{ source.kind === 'slack' ? 'Slack' : 'Doc' }}</span>
-                <NuxtLink v-if="source.url.startsWith('/')" :to="source.url">{{ source.title }}</NuxtLink>
-                <a v-else :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.title }}</a>
-                <span v-if="source.detail" class="meta"> · {{ source.detail }}</span>
+          <div v-if="turn.status !== 'streaming' && citedSources(turn).length" class="mt-3.5 border-t border-dashed border-default pt-3">
+            <p class="eyebrow mb-1.5">Sources</p>
+            <ul class="grid gap-1.5 text-sm">
+              <li v-for="source in citedSources(turn)" :key="source.url" class="flex flex-wrap items-center gap-x-1.5">
+                <UBadge color="neutral" variant="outline" size="sm" class="min-w-12 justify-center uppercase" :label="source.kind === 'slack' ? 'Slack' : 'Doc'" />
+                <NuxtLink v-if="source.url.startsWith('/')" class="text-primary underline" :to="source.url">{{ source.title }}</NuxtLink>
+                <a v-else class="text-primary underline" :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.title }}</a>
+                <span v-if="source.detail" class="text-muted">· {{ source.detail }}</span>
               </li>
             </ul>
           </div>
 
-          <p v-if="turn.status === 'stopped'" class="meta chat-stopped">Stopped.</p>
+          <p v-if="turn.status === 'stopped'" class="mt-2 text-sm text-muted">Stopped.</p>
           <ErrorState
             v-if="turn.status === 'error'"
             :error="turn.error"
@@ -295,32 +313,35 @@ onBeforeUnmount(stop)
         </article>
       </li>
     </ol>
-    <div ref="end" class="chat-end" />
+    <div ref="end" class="h-px" />
 
-    <form class="chat-composer" @submit.prevent="ask(draft)">
+    <form
+      class="flex items-end gap-2"
+      :class="turns.length ? 'sticky bottom-0 mt-auto bg-linear-to-b from-transparent to-paper to-[1rem] pt-4 pb-5' : ''"
+      @submit.prevent="ask(draft)"
+    >
       <label class="sr-only" for="chat-input">Ask Korwell</label>
-      <textarea
+      <UTextarea
         id="chat-input"
-        ref="input"
+        ref="composer"
         v-model="draft"
-        rows="1"
+        class="flex-1"
+        :rows="1"
+        autoresize
+        :maxrows="8"
+        size="xl"
         maxlength="8000"
         enterkeyhint="send"
         placeholder="Ask about a project, a decision, a person…"
+        :ui="{ base: 'resize-none rounded-xl ring-primary' }"
         @keydown="onKeydown"
       />
-      <button v-if="streaming" class="chat-send" type="button" aria-label="Stop answering" title="Stop" @click="stop">
-        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor" /></svg>
-      </button>
-      <button v-else class="chat-send" type="submit" :disabled="!draft.trim()" aria-label="Send" title="Send (Enter)">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M5 12h13m-5-6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
+      <UButton v-if="streaming" type="button" icon="i-lucide-square" size="xl" square aria-label="Stop answering" title="Stop" @click="stop" />
+      <UButton v-else type="submit" icon="i-lucide-arrow-right" size="xl" square :disabled="!draft.trim()" aria-label="Send" title="Send (Enter)" />
     </form>
-    <ul v-if="!turns.length" class="chat-suggestions" aria-label="Example questions">
+    <ul v-if="!turns.length" class="mt-4 mb-8 flex flex-wrap justify-center gap-2" aria-label="Example questions">
       <li v-for="suggestion in suggestions" :key="suggestion">
-        <button type="button" @click="ask(suggestion)">{{ suggestion }}</button>
+        <UButton color="neutral" variant="outline" class="bg-default text-primary" :ui="{ label: 'whitespace-normal text-start' }" :label="suggestion" @click="ask(suggestion)" />
       </li>
     </ul>
   </main>

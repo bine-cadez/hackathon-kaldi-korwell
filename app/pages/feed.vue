@@ -206,83 +206,102 @@ async function saveDocument () {
 </script>
 
 <template>
-  <main class="feed-page feed-with-eyes">
-    <div class="archive-page">
+  <main class="relative isolate flex flex-col overflow-clip">
+    <div class="mx-auto w-[min(46rem,calc(100%-2rem))] pt-10 pb-6">
       <div ref="feedEye" class="feed-heading">
         <ArchiveEye
+          class="mx-0 w-32"
           :class="{ 'feed-eye-travelling': eyeTravel }"
           :style="eyeMotionStyle"
           :black-hole="eyeBlackHole"
         />
-        <p class="eyebrow">Records intake</p>
-        <h1>Add a document</h1>
+        <PageHeading eyebrow="Records intake" title="Add a document" />
       </div>
       <form
         ref="uploadForm"
-        class="card feed-form"
-        :class="{ 'feed-form-hidden': formHidden }"
+        class="grid gap-4 rounded-2xl bg-default p-4 shadow-xs ring ring-default transition-opacity duration-[1100ms] ease-in-out motion-reduce:transition-none sm:p-6"
+        :class="{ 'opacity-0': formHidden }"
         :style="eyeTravel ? { transitionDuration: eyeTravel.duration + 'ms' } : undefined"
         :inert="formHidden"
         @submit.prevent="saveDocument"
       >
-        <label>
-          Title
-          <input v-model="title" type="text" name="title" maxlength="200" required placeholder="Runbook title">
-        </label>
-        <label>
-          Author
-          <input v-model="author" type="text" name="author" maxlength="200" placeholder="Optional">
-        </label>
-        <label>
-          Body
-          <textarea
+        <UFormField label="Title" required>
+          <UInput v-model="title" name="title" maxlength="200" required placeholder="Runbook title" class="w-full" />
+        </UFormField>
+        <UFormField label="Author">
+          <UInput v-model="author" name="author" maxlength="200" placeholder="Optional" class="w-full" />
+        </UFormField>
+        <UFormField label="Body" :required="!convertFile">
+          <UTextarea
             v-model="body"
             name="body"
+            :rows="10"
+            autoresize
+            :maxrows="24"
+            class="w-full"
             :required="!convertFile"
             :disabled="Boolean(convertFile)"
             :placeholder="convertFile ? `Text will be extracted from ${convertFile.name} on save` : 'Paste markdown or plain text'"
           />
-        </label>
-        <label class="dropzone" :class="{ 'is-dragging': dragging, 'has-file': pickedName && !dragging }">
-          <input ref="fileInput" class="dropzone-input" type="file" :accept="ACCEPT" :disabled="saving" @change="onFile">
+        </UFormField>
+        <label
+          class="relative grid cursor-pointer justify-items-center gap-1 rounded-xl border-2 p-6 text-center transition-colors focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary"
+          :class="dragging
+            ? 'border-solid border-orange bg-orange/10'
+            : pickedName
+              ? 'border-solid border-success bg-success/5'
+              : 'border-dashed border-default hover:border-primary hover:bg-primary/5'"
+        >
+          <!-- Visually hidden but still focusable, so keyboard users can open the picker. -->
+          <input ref="fileInput" class="pointer-events-none absolute size-px opacity-0" type="file" :accept="ACCEPT" :disabled="saving" @change="onFile">
+          <UIcon :name="pickedName && !dragging ? 'i-lucide-file-check' : 'i-lucide-upload'" class="size-6" :class="pickedName && !dragging ? 'text-success' : 'text-primary'" />
           <template v-if="dragging">
             <strong>{{ pickedName ? 'Drop to replace the file' : 'Drop to add this file' }}</strong>
-            <span class="dropzone-hint">{{ ACCEPT_LABEL }} · up to 10 MB</span>
+            <span class="text-sm text-muted">{{ ACCEPT_LABEL }} · up to 10 MB</span>
           </template>
           <template v-else-if="pickedName">
-            <strong><span aria-hidden="true">✓ </span>{{ pickedName }} added</strong>
-            <span class="dropzone-hint">
+            <strong class="text-success">{{ pickedName }} added</strong>
+            <span class="text-sm text-muted">
               {{ pickedIsText ? 'Its text is in the body above.' : 'It is converted to text when you save.' }}
               Drop or click to choose a different file.
             </span>
           </template>
           <template v-else>
             <strong>Drag a file here, or click to choose</strong>
-            <span class="dropzone-hint">{{ ACCEPT_LABEL }} · up to 10 MB</span>
+            <span class="text-sm text-muted">{{ ACCEPT_LABEL }} · up to 10 MB</span>
           </template>
         </label>
-        <p v-if="pickedName" class="row">
-          <button class="ghost" type="button" :disabled="saving" @click="clearFile">Remove file</button>
-        </p>
-        <div class="row">
-          <button class="primary" type="submit" :disabled="saving">
-            {{ saving ? (convertFile ? 'Converting and saving…' : 'Saving…') : 'Save document' }}
-          </button>
+        <div class="flex flex-wrap items-center gap-2">
+          <UButton
+            type="submit"
+            size="lg"
+            :loading="saving"
+            :label="saving ? (convertFile ? 'Converting and saving…' : 'Saving…') : 'Save document'"
+          />
+          <UButton v-if="pickedName" color="neutral" variant="outline" size="lg" icon="i-lucide-x" label="Remove file" :disabled="saving" @click="clearFile" />
         </div>
-        <p v-if="saveMessage" class="ok" role="status">{{ saveMessage }}</p>
-        <p v-if="fileError" class="err" role="alert">{{ fileError }}</p>
-        <div v-if="duplicate" class="duplicate-warning" role="alert">
-          <p class="duplicate-title">This document is already in the archive</p>
-          <p>
+        <p v-if="saveMessage" class="m-0 text-success" role="status">{{ saveMessage }}</p>
+        <UAlert v-if="fileError" role="alert" color="error" variant="subtle" icon="i-lucide-file-x" :title="fileError" />
+        <UAlert
+          v-if="duplicate"
+          role="alert"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-copy"
+          title="This document is already in the archive"
+          :actions="[
+            { label: 'Open existing document', color: 'neutral', variant: 'outline', size: 'sm', to: { path: '/library', query: { document: duplicate.id } } },
+            { label: 'Dismiss', color: 'neutral', variant: 'link', size: 'sm', onClick: () => dismissSaveError() }
+          ]"
+          orientation="vertical"
+          :ui="{ title: 'font-bold text-error', description: 'text-default opacity-100' }"
+        >
+          <template #description>
             It matches
-            <NuxtLink :to="{ path: '/library', query: { document: duplicate.id } }">“{{ duplicate.title }}”</NuxtLink><template v-if="duplicateDate">, added {{ duplicateDate }}</template>.
+            <NuxtLink class="font-semibold text-primary underline" :to="{ path: '/library', query: { document: duplicate.id } }">“{{ duplicate.title }}”</NuxtLink><template v-if="duplicateDate">, added {{ duplicateDate }}</template>.
             Nothing was saved. Choose a different file, or open the existing one.
-          </p>
-          <div class="row">
-            <NuxtLink class="ghost button-link" :to="{ path: '/library', query: { document: duplicate.id } }">Open existing document</NuxtLink>
-            <button class="error-state-dismiss" type="button" @click="dismissSaveError()">Dismiss</button>
-          </div>
-        </div>
+          </template>
+        </UAlert>
         <ErrorState
           v-else-if="saveError"
           :error="saveError"
@@ -310,91 +329,7 @@ async function saveDocument () {
 </template>
 
 <style scoped>
-.duplicate-warning {
-  display: grid;
-  gap: 0.5rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid color-mix(in srgb, var(--brand-orange) 55%, var(--line));
-  border-left-width: 4px;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--brand-orange) 8%, var(--card));
-}
-
-.duplicate-warning p { margin: 0; }
-
-.duplicate-title { font-weight: 700; color: var(--warn); }
-
-.duplicate-warning a:not(.button-link) { color: var(--accent); font-weight: 600; }
-
-.dropzone {
-  position: relative;
-  display: grid;
-  justify-items: center;
-  gap: 0.25rem;
-  padding: 1.4rem 1rem;
-  border: 2px dashed var(--line);
-  border-radius: 12px;
-  background: var(--card);
-  text-align: center;
-  cursor: pointer;
-  transition: border-color 0.15s, background-color 0.15s;
-}
-
-.dropzone:hover {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 5%, var(--card));
-}
-
-.dropzone.has-file {
-  border-style: solid;
-  border-color: var(--ok);
-  background: color-mix(in srgb, var(--ok) 7%, var(--card));
-}
-
-.dropzone.has-file strong { color: var(--ok); }
-
-.dropzone.is-dragging {
-  border-style: solid;
-  border-color: var(--brand-orange);
-  background: color-mix(in srgb, var(--brand-orange) 10%, var(--card));
-}
-
-.dropzone:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* Visually hidden but still focusable, so keyboard users can open the picker. */
-.dropzone-input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.dropzone-hint { color: var(--muted); font-size: 0.85rem; }
-
-.feed-with-eyes {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  isolation: isolate;
-  overflow: clip;
-}
-.feed-with-eyes > .archive-page {
-  margin-block: 0;
-  padding-bottom: 1.5rem;
-}
-.feed-form {
-  transition: opacity 1100ms ease-in-out;
-}
-.feed-form-hidden {
-  opacity: 0;
-}
-@media (prefers-reduced-motion: reduce) {
-  .feed-form { transition-property: none; }
-}
+/* The eye flies to the Panem rewards and back (PanemRewards.vue drives it). */
 .feed-heading :deep(.feed-eye-travelling) {
   position: relative;
   z-index: 3;
@@ -402,11 +337,9 @@ async function saveDocument () {
   transition-property: transform;
   transition-timing-function: ease-in-out;
 }
-.feed-heading > h1 {
-  line-height: 1.12;
-  margin-bottom: 1.4rem;
-}
-.feed-with-eyes .feed-heading :is(h1, .eyebrow) {
+
+/* Keep the heading readable while the eyes swarm behind it. */
+.feed-heading :deep(:is(h1, .eyebrow)) {
   -webkit-text-stroke: 0.2em var(--paper);
   paint-order: stroke fill;
 }

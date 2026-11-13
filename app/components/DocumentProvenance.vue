@@ -28,13 +28,9 @@ const size = computed(() => {
 </script>
 
 <template>
-  <p v-if="uploaded || source" class="meta provenance">
+  <p v-if="uploaded || source" class="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
     <span v-if="uploaded">{{ uploaded }}</span>
-    <a v-if="source" :href="source.url" download>{{ size ? `Original: ${source.filename} (${size})` : `Original: ${source.filename}` }}</a>
+    <a v-if="source" class="text-primary underline underline-offset-[0.2em]" :href="source.url" download>{{ size ? `Original: ${source.filename} (${size})` : `Original: ${source.filename}` }}</a>
   </p>
 </template>
 
-<style scoped>
-.provenance { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; font-size: 0.85rem; }
-.provenance a { color: var(--accent); text-underline-offset: 0.2em; }
-</style>

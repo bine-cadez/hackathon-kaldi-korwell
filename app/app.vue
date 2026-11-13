@@ -4,26 +4,40 @@ const accessEmail = useState<string | null>('korwell-access-email', () => {
   return null
 })
 
+const links = [
+  { label: 'Ask', to: '/chat' },
+  { label: 'Search', to: '/' },
+  { label: 'Library', to: '/library' },
+  { label: 'Add document', to: '/feed' },
+  { label: 'Connect Claude', to: '/connect' }
+]
+
 useHead({
   link: [{ rel: 'icon', type: 'image/svg+xml', href: '/korwell-eye.svg?v=2' }]
 })
 </script>
 
 <template>
-  <div class="archive-app">
-    <NuxtRouteAnnouncer />
-    <header class="archive-header">
-      <NuxtLink class="archive-brand" to="/">The Kaldi Archive</NuxtLink>
-      <nav aria-label="Main navigation">
-        <NuxtLink to="/chat">Ask</NuxtLink>
-        <NuxtLink to="/">Search</NuxtLink>
-        <NuxtLink to="/library">Library</NuxtLink>
-        <NuxtLink to="/feed">Add document</NuxtLink>
-        <NuxtLink to="/connect">Connect Claude</NuxtLink>
-      </nav>
-      <span v-if="accessEmail" class="archive-account" aria-label="Signed in email">{{ accessEmail }}</span>
-    </header>
-    <NuxtPage />
-    <footer class="archive-disclaimer">Korwell can make mistakes. The archive is only human.</footer>
-  </div>
+  <UApp>
+    <!-- The page's <main> fills the height, keeping the footer at the bottom. -->
+    <div class="flex min-h-screen flex-col [&>main]:flex-[1_0_auto]">
+      <NuxtRouteAnnouncer />
+      <AppHeader>
+        <nav aria-label="Main navigation" class="flex flex-wrap gap-x-6 gap-y-2">
+          <NuxtLink
+            v-for="link in links"
+            :key="link.to"
+            :to="link.to"
+            class="underline-offset-[0.35em] hover:underline"
+            exact-active-class="underline"
+          >
+            {{ link.label }}
+          </NuxtLink>
+        </nav>
+        <span v-if="accessEmail" class="text-sm [overflow-wrap:anywhere]" aria-label="Signed in email">{{ accessEmail }}</span>
+      </AppHeader>
+      <NuxtPage />
+      <footer class="px-16 py-4 text-center text-xs text-muted">Korwell can make mistakes. The archive is only human.</footer>
+    </div>
+  </UApp>
 </template>

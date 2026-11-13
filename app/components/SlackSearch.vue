@@ -87,40 +87,42 @@ async function runSearch () {
 </script>
 
 <template>
-  <div class="slack-search">
-    <form class="search-form" role="search" novalidate @submit.prevent="runSearch">
-      <div class="search-bar">
-        <label class="sr-only" for="slack-query">Search Slack messages</label>
-        <input id="slack-query" v-model="query" :aria-invalid="queryInvalid || undefined" type="text" name="query" placeholder="Search Slack messages…" @input="queryInvalid = false">
-        <button class="search-submit" type="submit" :disabled="searching" :aria-label="searching ? 'Searching…' : 'Search Slack'">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle cx="10.5" cy="10.5" r="5.5" stroke="currentColor" stroke-width="2"/>
-            <path d="m15 15 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        </button>
-      </div>
-      <div class="search-filters">
-        <label>
-          Channel
-          <input v-model="channel" type="text" name="channel" maxlength="200" placeholder="Name or channel ID">
-        </label>
-        <label>
-          Person
-          <input v-model="user" type="text" name="user" maxlength="200" placeholder="Name or user ID">
-        </label>
-        <label>
-          From
-          <input v-model="fromDate" type="date" name="from">
-        </label>
-        <label>
-          To
-          <input v-model="toDate" type="date" name="to">
-        </label>
-      </div>
-      <p class="meta search-filter-note">Dates include the whole day, in UTC. Deleted messages stay in the archive and are marked deleted.</p>
+  <div class="text-start">
+    <form class="grid gap-3.5" role="search" novalidate @submit.prevent="runSearch">
+      <SearchBar
+        v-model="query"
+        input-id="slack-query"
+        label="Search Slack messages"
+        placeholder="Search Slack messages…"
+        :searching="searching"
+        :invalid="queryInvalid"
+        @input="queryInvalid = false"
+      />
+      <SearchFilters>
+        <UFormField label="Channel">
+          <UInput v-model="channel" name="channel" maxlength="200" placeholder="Name or channel ID" class="w-full" />
+        </UFormField>
+        <UFormField label="Person">
+          <UInput v-model="user" name="user" maxlength="200" placeholder="Name or user ID" class="w-full" />
+        </UFormField>
+        <UFormField label="From">
+          <UInput v-model="fromDate" type="date" name="from" class="w-full" />
+        </UFormField>
+        <UFormField label="To">
+          <UInput v-model="toDate" type="date" name="to" class="w-full" />
+        </UFormField>
+      </SearchFilters>
+      <p class="m-0 text-sm text-muted">Dates include the whole day, in UTC. Deleted messages stay in the archive and are marked deleted.</p>
     </form>
-    <p v-if="queryInvalid" class="query-feedback" role="alert">Enter a search term or a channel, person, or date.</p>
-    <section v-if="searched" class="search-results" aria-label="Slack results" :aria-busy="searching">
+    <UAlert
+      v-if="queryInvalid"
+      role="alert"
+      color="warning"
+      variant="subtle"
+      class="mt-3"
+      title="Enter a search term or a channel, person, or date."
+    />
+    <section v-if="searched" class="mt-8 border-t-3 border-double border-default pt-4" aria-label="Slack results" :aria-busy="searching">
       <template v-if="searching">
         <p role="status" class="sr-only">Searching Slack…</p>
         <ResultSkeleton />
@@ -128,24 +130,33 @@ async function runSearch () {
       <ErrorState v-else-if="searchError" :error="searchError" title="Slack search didn’t finish" @retry="runSearch()" />
       <p v-else-if="!matches.length" role="status">No Slack messages matched.</p>
       <template v-else>
-        <h2>From Slack</h2>
-        <ol class="results">
-          <li v-for="hit in matches" :key="hit.channelId + hit.ts" class="result">
-            <h3>{{ author(hit) }}</h3>
-            <p class="meta">
+        <h2 class="text-2xl">From Slack</h2>
+        <ol class="mt-3 grid gap-2">
+          <li v-for="hit in matches" :key="hit.channelId + hit.ts" class="rounded-xl border border-default bg-default p-3">
+            <h3 class="text-lg">{{ author(hit) }}</h3>
+            <p class="mt-0.5 flex flex-wrap items-center gap-1.5 text-sm text-muted">
               <span>{{ hit.channelName ? '#' + hit.channelName : hit.channelId }}</span>
-              <span> · {{ when(hit) }}</span>
-              <span v-if="hit.editedAt"> · edited</span>
-              <span v-if="hit.deleted"> · deleted</span>
+              <span>· {{ when(hit) }}</span>
+              <UBadge v-if="hit.editedAt" color="neutral" variant="outline" size="sm" label="edited" />
+              <UBadge v-if="hit.deleted" color="error" variant="subtle" size="sm" label="deleted" />
             </p>
-            <p v-if="hit.parent" class="meta">
+            <p v-if="hit.parent" class="mt-0.5 text-sm text-muted">
               In thread<span v-if="hit.parent.text"> · {{ hit.parent.text }}</span>
               <span v-if="hit.parent.deleted"> · parent deleted</span>
             </p>
-            <p v-else-if="hit.replyCount" class="meta">{{ hit.replyCount }} {{ hit.replyCount === 1 ? 'reply' : 'replies' }}</p>
-            <p class="chunk">{{ hit.text || 'No text.' }}</p>
-            <p v-if="hit.files.length" class="meta">{{ hit.files.map(file => file.name || file.title || 'file').join(', ') }}</p>
-            <a v-if="hit.permalink" class="ghost slack-permalink" :href="hit.permalink" target="_blank" rel="noopener noreferrer">Open in Slack</a>
+            <p v-else-if="hit.replyCount" class="mt-0.5 text-sm text-muted">{{ hit.replyCount }} {{ hit.replyCount === 1 ? 'reply' : 'replies' }}</p>
+            <p class="mt-2 leading-normal break-words whitespace-pre-wrap">{{ hit.text || 'No text.' }}</p>
+            <p v-if="hit.files.length" class="mt-1 text-sm text-muted">{{ hit.files.map(file => file.name || file.title || 'file').join(', ') }}</p>
+            <UButton
+              v-if="hit.permalink"
+              class="mt-2 px-0 font-bold"
+              variant="link"
+              trailing-icon="i-lucide-external-link"
+              label="Open in Slack"
+              :to="hit.permalink"
+              target="_blank"
+              rel="noopener noreferrer"
+            />
           </li>
         </ol>
       </template>

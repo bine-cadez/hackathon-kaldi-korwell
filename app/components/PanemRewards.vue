@@ -61,7 +61,7 @@ const canRefill = computed(() => intro.value === 'done' && !refilled.value && !w
   phase.value !== 'full' && phase.value !== 'swallowing')
 const voucherReference = ref('')
 const voucherUrl = computed(() => '/api/demo/panem/' + voucherReference.value + '.svg')
-const fillButton = ref<HTMLButtonElement | null>(null)
+const fillButton = ref<{ $el: HTMLElement } | null>(null)
 const woltButton = ref<HTMLButtonElement | null>(null)
 const voucherTicket = ref<HTMLAnchorElement | null>(null)
 let observer: ResizeObserver | undefined
@@ -420,7 +420,7 @@ async function startNextRound () {
   phase.value = words.value >= demoGoal ? 'wolt' : 'collecting'
   saveProgress()
   await nextTick()
-  fillButton.value?.focus()
+  fillButton.value?.$el.focus()
 }
 
 onBeforeUnmount(() => {
@@ -519,13 +519,9 @@ onBeforeUnmount(() => {
           </div>
           <progress :value="words" :max="demoGoal" aria-label="Words toward lunch" />
           <div v-if="demo" class="progress-actions">
-            <button ref="fillButton" type="button" class="primary" :disabled="phase !== 'collecting' || intro !== 'done'" @click="fillEyes">
-              Fill the eyes
-            </button>
+            <UButton ref="fillButton" size="sm" label="Fill the eyes" :disabled="phase !== 'collecting' || intro !== 'done'" @click="fillEyes" />
             <span>{{ clicks }} of {{ roundLength }} demo clicks</span>
-            <button type="button" class="ghost replay-intro" :disabled="phase !== 'collecting' || intro !== 'done'" @click="replayIntro">
-              Replay intro
-            </button>
+            <UButton class="replay-intro" size="sm" color="neutral" variant="outline" label="Replay intro" :disabled="phase !== 'collecting' || intro !== 'done'" @click="replayIntro" />
           </div>
           <p class="sr-only" role="status">
             {{ lastAdded ? '+' + format.format(lastAdded) + (demo ? ' demo words' : ' words from your document') : '' }}
@@ -548,7 +544,7 @@ onBeforeUnmount(() => {
               alt="Download sample voucher: One Lunch on Kaldi’s eyes."
             >
           </a>
-          <button type="button" class="ghost" @click="startNextRound">Start another round</button>
+          <UButton color="neutral" variant="outline" label="Start another round" @click="startNextRound" />
         </div>
 
       </div>
@@ -692,7 +688,6 @@ progress {
   accent-color: #ac3e22;
 }
 .progress-actions { margin-top: 0.35rem; gap: 0.3rem 0.6rem; }
-.progress-actions button { padding: 0.25rem 0.65rem; }
 .is-swallowing { background: transparent; border-color: transparent; visibility: hidden; }
 .wolt-reveal {
   display: flex;

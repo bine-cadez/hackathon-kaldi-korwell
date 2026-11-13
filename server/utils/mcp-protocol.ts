@@ -163,11 +163,11 @@ function slackTool () {
   return {
     name: 'search_slack',
     title: 'Search Slack archive',
-    description: 'Search archived Slack messages. Read-only. Use this for channel conversations, not for documents in the library. search and fetch stay on documents.',
+    description: 'Search archived Slack messages. Read-only. Use this for channel conversations, not for documents in the library. search and fetch stay on documents. Keyword search, not semantic: pass one to three distinctive words that the message itself would contain, not a whole question. Word endings are ignored (oprema also finds opreme). Messages must contain every word; if none do, messages with any of the words come back instead. Messages mix Slovenian and English, so when a search misses, try the other language (proračun or budget).',
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Words to find in archived messages.' },
+        query: { type: 'string', description: 'One to three key words to find in archived messages.' },
         channel: { type: 'string', description: 'Channel id or name.' },
         user: { type: 'string', description: 'User id or display name.' },
         from: { type: 'string', description: 'Inclusive UTC start date (YYYY-MM-DD).' },

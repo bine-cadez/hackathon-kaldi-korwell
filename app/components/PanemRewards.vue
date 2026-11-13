@@ -15,7 +15,7 @@ const emit = defineEmits<{
   appetite: [filled: number]
 }>()
 const eyeCount = EYE_COUNT
-const demoGoal = 24_000
+const demoGoal = 3_000
 const wordsPerEye = demoGoal / eyeCount
 const roundLength = 5
 const pullTime = 5400
@@ -675,8 +675,18 @@ progress {
   width: 100%;
   height: 0.3rem;
   margin: 0.2rem 0 0;
-  accent-color: var(--accent);
+  /* Styled by hand: browsers ignore or recolour accent-color on <progress>.
+     The fill is the eyes' orange, so the bar matches the field it counts. */
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--line);
+  color: var(--brand-orange);
 }
+progress::-webkit-progress-bar { background: var(--line); }
+progress::-webkit-progress-value { background: var(--brand-orange); border-radius: 999px; }
+progress::-moz-progress-bar { background: var(--brand-orange); border-radius: 999px; }
 .progress-actions { margin-top: 0.35rem; gap: 0.3rem 0.6rem; }
 .is-swallowing { background: transparent; border-color: transparent; visibility: hidden; }
 .wolt-reveal {

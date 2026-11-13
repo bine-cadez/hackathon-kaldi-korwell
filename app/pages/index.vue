@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ChatSource, ChatTurn, ToolActivity } from '~/composables/useChatHistory'
+import type { ChatSource, ChatTurn } from '~/composables/useChatHistory'
 
 type ChatEvent =
   | { type: 'text', text: string }
@@ -213,23 +213,6 @@ function showHistory () {
 // The few latest chats, listed under the suggestions on the empty page.
 const recentChats = computed(() => history.chats.value.slice(0, 4))
 
-function quoted (value: unknown) {
-  return typeof value === 'string' && value ? `“${value}”` : ''
-}
-
-function toolLabel (tool: ToolActivity) {
-  const { input } = tool
-  if (tool.name === 'fetch') return tool.done ? (tool.ok ? `Read ${quoted(tool.title) || 'a document'}` : 'Couldn’t open a document') : 'Reading a document…'
-  const where = tool.name === 'search_slack' ? 'Slack' : 'documents'
-  const what = quoted(input.query) || quoted(input.author)
-  const channel = tool.name === 'search_slack' && typeof input.channel === 'string' && input.channel ? ` in #${input.channel.replace(/^#/, '')}` : ''
-  const range = typeof input.from === 'string' || typeof input.to === 'string' ? ` · ${input.from || '…'} – ${input.to || '…'}` : ''
-  const base = `Searched ${where}${what ? ` for ${what}` : ''}${channel}${range}`
-  if (!tool.done) return `${base}…`
-  if (!tool.ok) return `${base} · failed`
-  return `${base} · ${tool.count} ${tool.count === 1 ? 'result' : 'results'}`
-}
-
 // URLs the tools returned for this answer. Only these external links are clickable.
 function sourceUrls (turn: ChatTurn) {
   return new Set(turn.sources.map(source => source.url))
@@ -343,43 +326,24 @@ onBeforeUnmount(() => {
            right, Korwell's answer is plain text on the left. -->
       <ol class="mx-auto grid w-[min(48rem,100%-2rem)] flex-1 content-start gap-10 pt-10 pb-6" aria-live="polite">
         <li v-for="pair in pairs" :key="pair.question.id" class="grid gap-6">
-          <h2 class="ml-auto max-w-[min(80%,36rem)] rounded-3xl bg-accented px-5 py-2.5 font-sans text-[1.0625rem] leading-relaxed font-normal tracking-normal whitespace-pre-wrap text-highlighted [overflow-wrap:anywhere]">
+          <h2 class="chat-bubble ml-auto max-w-[min(80%,36rem)] font-sans text-[1.0625rem] leading-relaxed font-normal tracking-normal whitespace-pre-wrap text-highlighted [overflow-wrap:anywhere]" :class="{ 'chat-rise': pair.last }">
             <span class="sr-only">You asked: </span>{{ pair.question.text }}
           </h2>
 
           <article v-if="pair.answer" class="min-w-0" :aria-busy="pair.answer.status === 'streaming'">
-            <ul v-if="pair.answer.tools.length" class="mb-4 grid gap-1 text-sm" aria-label="What Korwell looked up">
-              <li
-                v-for="tool in pair.answer.tools"
-                :key="tool.id"
-                class="flex items-baseline gap-2 [overflow-wrap:anywhere]"
-                :class="tool.done && !tool.ok ? 'text-error' : 'text-muted'"
-              >
-                <UIcon
-                  :name="tool.name === 'fetch' ? 'i-lucide-file-text' : tool.name === 'search_slack' ? 'i-lucide-hash' : 'i-lucide-search'"
-                  class="size-4 flex-none self-center text-primary"
-                  :class="{ 'chat-pulse': !tool.done }"
-                />
-                {{ toolLabel(tool) }}
-              </li>
-            </ul>
+            <ChatActivity :tools="pair.answer.tools" :working="pair.answer.status === 'streaming'" :has-text="!!pair.answer.text" />
 
             <div
               v-if="pair.answer.text"
               class="chat-answer-body"
+              :class="{ 'is-streaming': pair.answer.status === 'streaming', 'chat-fade': pair.last }"
               @click="onAnswerClick"
               v-html="renderChatMarkdown(pair.answer.text, sourceUrls(pair.answer))"
             />
-            <p v-else-if="pair.answer.status === 'streaming'" class="my-2 flex gap-1.5" role="status">
-              <span class="chat-pulse size-2 rounded-full bg-orange" />
-              <span class="chat-pulse size-2 rounded-full bg-orange [animation-delay:0.15s]" />
-              <span class="chat-pulse size-2 rounded-full bg-orange [animation-delay:0.3s]" />
-              <span class="sr-only">Korwell is thinking…</span>
-            </p>
 
             <ol
               v-if="pair.answer.status !== 'streaming' && citedSources(pair.answer).length"
-              class="mt-5 grid list-decimal gap-1.5 rounded-2xl border border-default py-3 pr-4 pl-9 text-sm marker:font-semibold marker:text-primary"
+              class="chat-fade mt-5 grid list-decimal gap-1.5 rounded-2xl border border-default py-3 pr-4 pl-9 text-sm marker:font-semibold marker:text-primary"
               aria-label="Sources"
             >
               <li v-for="source in citedSources(pair.answer)" :key="source.url" class="pl-1">

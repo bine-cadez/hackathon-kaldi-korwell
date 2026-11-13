@@ -216,6 +216,11 @@ function toolLabel (tool: ToolActivity) {
   return `${base} · ${tool.count} ${tool.count === 1 ? 'result' : 'results'}`
 }
 
+// URLs the tools returned for this answer. Only these external links are clickable.
+function sourceUrls (turn: ChatTurn) {
+  return new Set(turn.sources.map(source => source.url))
+}
+
 // Only list the sources the answer actually links to.
 function citedSources (turn: ChatTurn) {
   return turn.sources.filter(source => turn.text.includes(`](${source.url})`))
@@ -261,7 +266,7 @@ onBeforeUnmount(stop)
             </li>
           </ul>
 
-          <div v-if="turn.text" class="chat-answer-body" @click="onAnswerClick" v-html="renderChatMarkdown(turn.text)" />
+          <div v-if="turn.text" class="chat-answer-body" @click="onAnswerClick" v-html="renderChatMarkdown(turn.text, sourceUrls(turn))" />
           <p v-else-if="turn.status === 'streaming'" class="chat-thinking" role="status">
             <span /><span /><span />
             <span class="sr-only">Korwell is thinking…</span>

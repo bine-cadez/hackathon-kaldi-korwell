@@ -1,7 +1,12 @@
 // A small markdown renderer for chat answers. Everything is escaped first, so
 // model output (which may quote documents or Slack) can never inject HTML.
 // Supports paragraphs, headings, bullet and numbered lists, code fences,
-// inline code, bold, italic, and links to http(s) or app-relative URLs.
+// inline code, bold, italic, and links.
+//
+// Links: a document or Slack message could tell the model to write a link that
+// carries conversation data to another site. So only two kinds of link are
+// clickable: library documents in this app, and external URLs a tool returned
+// for this answer (`allowed`). Anything else is shown as plain text.
 
 function escapeHtml (text: string): string {
   return text
@@ -12,10 +17,12 @@ function escapeHtml (text: string): string {
     .replace(/'/g, '&#39;')
 }
 
-export function safeHref (url: string): string | null {
+const LIBRARY_LINK = /^\/library\?document=[\w-]+$/
+
+export function safeHref (url: string, allowed: ReadonlySet<string> = new Set()): string | null {
   const href = url.trim()
-  if (/^https?:\/\/[^\s]+$/i.test(href)) return href
-  if (href.startsWith('/') && !href.startsWith('//')) return href
+  if (LIBRARY_LINK.test(href)) return href
+  if (/^https?:\/\/[^\s]+$/i.test(href) && allowed.has(href)) return href
   return null
 }
 
@@ -27,7 +34,7 @@ function emphasis (text: string): string {
     .replace(/\*([^*\s][^*\n]*?)\*/g, '<em>$1</em>')
 }
 
-export function renderInline (text: string): string {
+export function renderInline (text: string, allowed: ReadonlySet<string> = new Set()): string {
   let html = ''
   let last = 0
   for (const match of text.matchAll(INLINE)) {
@@ -38,7 +45,7 @@ export function renderInline (text: string): string {
     if (code !== undefined) {
       html += `<code>${escapeHtml(code)}</code>`
     } else if (label !== undefined && url !== undefined) {
-      const href = safeHref(url)
+      const href = safeHref(url, allowed)
       if (!href) {
         html += escapeHtml(whole)
       } else {
@@ -59,18 +66,18 @@ const NUMBERED = /^\s*\d+[.)]\s+(.*)$/
 const HEADING = /^\s*(#{1,6})\s+(.*)$/
 const FENCE = /^\s*```/
 
-export function renderChatMarkdown (source: string): string {
+export function renderChatMarkdown (source: string, allowed: ReadonlySet<string> = new Set()): string {
   const lines = source.replace(/\r\n?/g, '\n').split('\n')
   const blocks: string[] = []
   let paragraph: string[] = []
   let list: { tag: 'ul' | 'ol', items: string[] } | null = null
 
   const flushParagraph = () => {
-    if (paragraph.length) blocks.push(`<p>${paragraph.map(renderInline).join('<br>')}</p>`)
+    if (paragraph.length) blocks.push(`<p>${paragraph.map(line => renderInline(line, allowed)).join('<br>')}</p>`)
     paragraph = []
   }
   const flushList = () => {
-    if (list) blocks.push(`<${list.tag}>${list.items.map(item => `<li>${renderInline(item)}</li>`).join('')}</${list.tag}>`)
+    if (list) blocks.push(`<${list.tag}>${list.items.map(item => `<li>${renderInline(item, allowed)}</li>`).join('')}</${list.tag}>`)
     list = null
   }
 
@@ -99,7 +106,7 @@ export function renderChatMarkdown (source: string): string {
       flushParagraph()
       flushList()
       const tag = heading[1]!.length <= 2 ? 'h3' : 'h4'
-      blocks.push(`<${tag}>${renderInline(heading[2]!)}</${tag}>`)
+      blocks.push(`<${tag}>${renderInline(heading[2]!, allowed)}</${tag}>`)
       continue
     }
     const bullet = BULLET.exec(line)

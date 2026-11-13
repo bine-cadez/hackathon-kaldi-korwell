@@ -202,15 +202,26 @@ test('parseChatMessages validates roles, trims history, and needs a user last', 
 })
 
 test('renderChatMarkdown escapes HTML and only allows safe links', () => {
-  const html = renderChatMarkdown('<img src=x onerror=alert(1)> **bold** [doc](/library?document=a&b=1) [bad](javascript:alert(1)) [ext](https://slack.com/x)')
+  const allowed = new Set(['https://kaldi.slack.com/archives/C1/p1'])
+  const html = renderChatMarkdown('<img src=x onerror=alert(1)> **bold** [doc](/library?document=doc-1) [bad](javascript:alert(1)) [ext](https://kaldi.slack.com/archives/C1/p1)', allowed)
   assert.ok(!html.includes('<img'))
   assert.ok(html.includes('&lt;img'))
   assert.ok(html.includes('<strong>bold</strong>'))
-  assert.ok(html.includes('<a href="/library?document=a&amp;b=1">doc</a>'))
+  assert.ok(html.includes('<a href="/library?document=doc-1">doc</a>'))
   assert.ok(!html.includes('href="javascript'))
-  assert.ok(html.includes('<a href="https://slack.com/x" target="_blank" rel="noopener noreferrer">ext</a>'))
+  assert.ok(html.includes('<a href="https://kaldi.slack.com/archives/C1/p1" target="_blank" rel="noopener noreferrer">ext</a>'))
   assert.equal(safeHref('//evil.example'), null)
   assert.equal(safeHref('"/><script>'), null)
+})
+
+test('renderChatMarkdown does not link URLs the tools did not return', () => {
+  // A prompt-injected document could ask the model to leak the chat in a link.
+  const html = renderChatMarkdown('[Click to verify](https://evil.example/?q=secret+plans) [app](/authorize?client_id=x) [doc](/library?document=a&next=https://evil.example)')
+  assert.ok(!html.includes('<a'))
+  assert.ok(html.includes('[Click to verify](https://evil.example/?q=secret+plans)'))
+  assert.equal(safeHref('/library?document=doc-1'), '/library?document=doc-1')
+  assert.equal(safeHref('https://kaldi.slack.com/x'), null)
+  assert.equal(safeHref('https://kaldi.slack.com/x', new Set(['https://kaldi.slack.com/x'])), 'https://kaldi.slack.com/x')
 })
 
 test('renderChatMarkdown renders lists, headings, paragraphs and code', () => {

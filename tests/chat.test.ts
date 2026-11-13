@@ -123,7 +123,7 @@ test('runChat searches, reads tool results back, and streams the answer', async 
   assert.equal(tool.role, 'tool')
   assert.equal(tool.tool_call_id, 'call_a')
   const results = JSON.parse(String(tool.content)).results
-  assert.deepEqual(results[0], { id: 'doc-1', title: 'Kickoff notes', url: '/library?document=doc-1', snippet: 'We agreed to ship in May.', author: 'Ana', createdAt: '2026-03-02' })
+  assert.deepEqual(results[0], { id: 'doc-1', title: 'Kickoff notes', url: '/library/doc-1', snippet: 'We agreed to ship in May.', author: 'Ana', createdAt: '2026-03-02' })
   assert.equal(results.length, 2)
 
   assert.deepEqual(events.slice(0, 2), [
@@ -135,8 +135,8 @@ test('runChat searches, reads tool results back, and streams the answer', async 
       ok: true,
       count: 2,
       sources: [
-        { kind: 'document', title: 'Kickoff notes', url: '/library?document=doc-1', detail: '2026-03-02' },
-        { kind: 'document', title: 'Budget', url: '/library?document=doc-2', detail: undefined }
+        { kind: 'document', title: 'Kickoff notes', url: '/library/doc-1', detail: '2026-03-02' },
+        { kind: 'document', title: 'Budget', url: '/library/doc-2', detail: undefined }
       ]
     }
   ])
@@ -233,6 +233,10 @@ test('renderChatMarkdown does not link URLs the tools did not return', () => {
   assert.ok(!html.includes('<a'))
   assert.ok(html.includes('[Click to verify](https://evil.example/?q=secret+plans)'))
   assert.equal(safeHref('/library?document=doc-1'), '/library?document=doc-1')
+  // Document pages, the current citation form.
+  assert.equal(safeHref('/library/doc-1'), '/library/doc-1')
+  assert.equal(safeHref('/library/doc-1/../../authorize'), null)
+  assert.equal(safeHref('/library/doc-1?next=https://evil.example'), null)
   assert.equal(safeHref('https://kaldi.slack.com/x'), null)
   assert.equal(safeHref('https://kaldi.slack.com/x', new Set(['https://kaldi.slack.com/x'])), 'https://kaldi.slack.com/x')
 })

@@ -1,5 +1,6 @@
 import { CONVERTIBLE_TYPES, fileExtension } from './document-file.ts'
 import type { R2Bucket } from './env.ts'
+import { normalizeUnicode } from '../../shared/utils/text.ts'
 
 // R2 layout: everything for one document sits under documents/<id>/.
 //   documents/<id>/content.md        the markdown that was chunked and embedded
@@ -42,7 +43,8 @@ export function sourceContentType (filename: string): string {
 export function normalizeSourceFilename (filename: string | undefined): string {
   // Browsers send a basename, but strip any path and control characters anyway.
   const base = (filename || '').split(/[\\/]/).pop() || ''
-  const clean = base.replace(/[\u0000-\u001f\u007f]/g, '').trim()
+  // Composed Unicode (NFC): macOS can hand over "č" as c + combining caron.
+  const clean = normalizeUnicode(base.replace(/[\u0000-\u001f\u007f]/g, '')).trim()
   return (clean || 'upload').slice(0, FILENAME_MAX)
 }
 

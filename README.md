@@ -271,7 +271,7 @@ The upload time is the existing `created_at`.
 
 ## Duplicate uploads
 
-`migrations/0006_document_content_hash.sql` adds `documents.content_hash`, a SHA-256 of the normalized body (the text that gets chunked: CRLF to LF, trimmed). Before any embedding call, `POST /api/documents` looks for an existing document with the same hash. On a match it returns **409** with `{ data: { message, duplicate: { id, title, createdAt } } }`, and the upload page shows a warning that links to `/library?document=<id>`. Nothing is embedded or stored.
+`migrations/0006_document_content_hash.sql` adds `documents.content_hash`, a SHA-256 of the normalized body (the text that gets chunked: CRLF to LF, trimmed). Before any embedding call, `POST /api/documents` looks for an existing document with the same hash. On a match it returns **409** with `{ data: { message, duplicate: { id, title, createdAt } } }`, and the upload page shows a warning that links to the existing document's page (`/library/<id>`). Nothing is embedded or stored.
 
 Because the hash is taken from the extracted text, the same file renamed, uploaded with another title, or pasted as text also matches. Two different files that convert to the same text match as well.
 
@@ -310,7 +310,25 @@ npx wrangler d1 execute DB --local --command "SELECT document_id, author FROM do
 
 `cokolada` and `zupan` find the row with the carons. A search limited to `from=2024-06-01` does not.
 
-Other routes: `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/documents/:id`, `GET /api/health`, and the MCP routes below. With `SITE_PASSWORD` set, direct calls to the document and search routes return 401 before any embedding request. Health stays public. `POST /api/auth/login` checks the password and sets the cookie.
+`GET /api/documents` returns one page of the Library: `{ documents, total, page, pageSize, totalPages }`. Query parameters, all optional: `q` (words in the title, author, file name, or uploader email; prefix and accent-insensitive with FTS5, substring otherwise), `author` (exact name), `uploadedBy` (exact uploader email), `from` and `to` (inclusive UTC dates, `YYYY-MM-DD`), `sort` (`newest`, `oldest`, or `title`), `page` (from 1), and `pageSize` (1–100, default 20). Invalid values return 400. `GET /api/documents/facets` returns `{ authors, uploaders }`, each name with a document count, for the Library's Author and Uploaded by filters. The Library page keeps the same filters in its URL (`/library?q=…&author=…&uploader=…&page=2`). Each document has its own page at `/library/<id>`; the search page keeps its query in the URL too (`/?q=…&author=…`), so Back from a document returns to the results.
+
+### Sorting, file-name search, and Slovenian text
+
+The uploader (`uploaded_by`) and the original file (`source_*`) come from `0005_document_source.sql` above. `author` (from 0002) stays a separate, optional field: who wrote the document, not who uploaded it. `migrations/0007_document_title_sort.sql` adds:
+
+- `title_sort`: a sort key in Slovenian alphabet order (c < č < ć < d … z < ž), backfilled for existing rows. SQLite compares bytes, so without it Č, Š, Ž sort after Z.
+- Indexes for the Library's Title A–Z sort and its Author and Uploaded by filters.
+- A rebuilt `documents_fts` with the original file name (`source_filename`) as a fifth column, so the Library search finds "Poročilo_2024.pdf" from "porocilo". The update trigger now fires only when indexed text changes, not on `r2_key` or `content_hash` updates.
+
+D1 stores UTF-8, so Slovenian letters are stored as they are. Two things are handled on the way in (`shared/utils/text.ts`):
+
+- **Encoding.** Text and CSV files that are not valid UTF-8 are decoded as Windows-1250 (what Excel and Notepad write on Slovenian Windows) or ISO-8859-2. UTF-16 files with a byte order mark are decoded too. The upload form says when it converted a file. Text files are uploaded with their original too, so they get an R2 copy and a download link like PDFs.
+- **Normalization.** Titles, authors, file names, bodies, and filter values are stored in Unicode NFC, so a "č" sent as "c" plus a combining caron (common in macOS file names) equals a typed "č".
+- **File names with `;` or `=`.** The upload form sends the name in its own `fileName` field, because h3's multipart parser splits `Content-Disposition` on those characters.
+
+Like 0002 and 0005, the code detects the 0007 changes and keeps working before the migration runs. The deploy workflow applies remote migrations on merge.
+
+Other routes: `GET /api/documents/:id`, `DELETE /api/documents/:id`, `GET /api/health`, and the MCP routes below. With `SITE_PASSWORD` set, direct calls to the document and search routes return 401 before any embedding request. Health stays public. `POST /api/auth/login` checks the password and sets the cookie.
 
 ## Slack archive
 
@@ -355,6 +373,7 @@ migrations/0002_document_search.sql   author column and FTS5
 migrations/0003_slack_archive.sql
 migrations/0004_mcp_used_codes.sql    single-use MCP authorization codes
 migrations/0006_document_content_hash.sql   duplicate upload detection
+migrations/0007_document_title_sort.sql     Slovenian title sort, file names in FTS
 docs/slack-app-manifest.yml
 server/api/             upload, list, search, Slack events
 server/routes/          MCP endpoint and OAuth authorize, token, register
@@ -405,7 +424,7 @@ the live gate. No database migration is required.
 | `fetch` | Full document text for one `id` from `search`. Returns `{ "id", "title", "text", "url", "metadata" }`. |
 | `search_slack` | Search archived Slack messages (`query`, optional `channel`, `user`, `from`, `to`, `limit`). Listed only once migration 0003 is applied. Each result has `id` (`<channel>/<ts>`), `title`, `text`, `url`, `sentAt`, `deleted`, and `deletedAt`; deleted messages stay in the archive and are flagged. |
 
-`search` calls `searchDocuments` in `server/utils/search.ts`, which applies `from`, `to`, and `author`. It needs `query` or `author`; a date range alone is refused. Chunk hits are collapsed to one result per document. The citation URL is `https://<host>/library?document=<id>`.
+`search` calls `searchDocuments` in `server/utils/search.ts`, which applies `from`, `to`, and `author`. It needs `query` or `author`; a date range alone is refused. Chunk hits are collapsed to one result per document. The citation URL is the document's page, `https://<host>/library/<id>`. Older citations to `/library?document=<id>` redirect there (301).
 
 There are no write tools.
 

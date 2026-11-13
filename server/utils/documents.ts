@@ -5,6 +5,7 @@ import { deleteDocumentObjects, markdownKey, sourceKey, type SourceFile } from '
 import { contentHash, duplicateCheckEnabled, duplicateError, findDuplicate, hasContentHashColumn } from './duplicates'
 import { embedTexts } from './embeddings'
 import { ensureSchema } from './schema'
+import { normalizeUnicode, slovenianSortKey } from '../../shared/utils/text'
 import { useLocalVectors } from './vectors'
 import type { DocLibraryEnv } from './env'
 
@@ -21,15 +22,6 @@ interface SourceColumns {
   source_size: number | null
 }
 
-interface DocumentListRow extends SourceColumns {
-  id: string
-  title: string
-  author: string | null
-  created_at: string
-  r2_key: string | null
-  chunk_count: number
-}
-
 interface DocumentRow extends SourceColumns {
   id: string
   title: string
@@ -39,10 +31,10 @@ interface DocumentRow extends SourceColumns {
   created_at: string
 }
 
-const SOURCE_COLUMNS = ['uploaded_by', 'source_key', 'source_filename', 'source_content_type', 'source_size'] as const
+export const SOURCE_COLUMNS = ['uploaded_by', 'source_key', 'source_filename', 'source_content_type', 'source_size'] as const
 
 // Before migration 0005 the columns do not exist, so select NULLs under the same names.
-function sourceSelect (enabled: boolean, alias = ''): string {
+export function sourceSelect (enabled: boolean, alias = ''): string {
   return SOURCE_COLUMNS.map(column => enabled ? `${alias}${column}` : `NULL AS ${column}`).join(', ')
 }
 
@@ -63,9 +55,15 @@ export function assertDocumentId (id: string | undefined): string {
   return id
 }
 
+// One space between words and composed Unicode (NFC), so a "č" typed or pasted
+// on any system is stored as the same code point and matches filters exactly.
+function cleanLine (value: string): string {
+  return normalizeUnicode(value).trim().replace(/\s+/g, ' ')
+}
+
 function normalizeAuthor (value: unknown): string | null {
   if (typeof value !== 'string') return null
-  const author = value.trim().replace(/\s+/g, ' ')
+  const author = cleanLine(value)
   if (!author) return null
   if (author.length > AUTHOR_MAX) badRequest(`Author must be ${AUTHOR_MAX} characters or fewer`)
   return author
@@ -89,10 +87,10 @@ export async function saveDocument (env: DocLibraryEnv, apiKey: string, input: S
   await ensureSchema(env.DB)
   const caps = await readSearchCapabilities(env.DB)
 
-  const title = input.title.trim().replace(/\s+/g, ' ')
+  const title = cleanLine(input.title)
   const author = normalizeAuthor(input.author)
   const uploadedBy = input.uploadedBy?.trim() || null
-  const body = input.body.replace(/\r\n/g, '\n').trim()
+  const body = normalizeUnicode(input.body).replace(/\r\n?/g, '\n').trim()
   if (!title) badRequest('Title is required')
   if (title.length > TITLE_MAX) badRequest(`Title must be ${TITLE_MAX} characters or fewer`)
   if (!body) badRequest('Document body is required')
@@ -191,6 +189,8 @@ export async function saveDocument (env: DocLibraryEnv, apiKey: string, input: S
     columns.source_size = source?.data.byteLength ?? null
   }
   if (hash) columns.content_hash = hash
+  // Sorts Č after C and Ž after Z in the Library (see slovenianSortKey).
+  if (caps.titleSort) columns.title_sort = slovenianSortKey(title)
   const names = Object.keys(columns)
 
   try {
@@ -280,40 +280,13 @@ function sourceView (documentId: string, source: { filename: string, contentType
   }
 }
 
-function rowSource (row: { id: string, source_key?: string | null, source_filename?: string | null, source_content_type?: string | null, source_size?: number | null }) {
+export function rowSource (row: { id: string, source_key?: string | null, source_filename?: string | null, source_content_type?: string | null, source_size?: number | null }) {
   if (!row.source_key || !row.source_filename) return null
   return sourceView(row.id, {
     filename: row.source_filename,
     contentType: row.source_content_type ?? null,
     size: row.source_size == null ? null : Number(row.source_size)
   })
-}
-
-export async function listDocuments (env: DocLibraryEnv) {
-  await ensureSchema(env.DB)
-  const caps = await readSearchCapabilities(env.DB)
-  const authorSelect = caps.author ? 'd.author' : 'NULL'
-  const authorGroup = caps.author ? 'd.author, ' : ''
-  const sourceGroup = caps.source ? SOURCE_COLUMNS.map(column => `d.${column}, `).join('') : ''
-  const { results } = await env.DB.prepare(`
-    SELECT d.id, d.title, ${authorSelect} AS author, d.created_at, d.r2_key, ${sourceSelect(caps.source, 'd.')}, COUNT(c.id) AS chunk_count
-    FROM documents d
-    LEFT JOIN chunks c ON c.document_id = d.id
-    GROUP BY d.id, d.title, ${authorGroup}${sourceGroup}d.created_at, d.r2_key
-    ORDER BY d.created_at DESC
-    LIMIT 100
-  `).all<DocumentListRow>()
-
-  return results.map(row => ({
-    id: row.id,
-    title: row.title,
-    author: row.author ?? null,
-    uploadedBy: row.uploaded_by ?? null,
-    createdAt: row.created_at,
-    r2Key: row.r2_key,
-    source: rowSource(row),
-    chunkCount: Number(row.chunk_count)
-  }))
 }
 
 export async function getDocument (env: DocLibraryEnv, id: string) {

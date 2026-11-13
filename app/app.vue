@@ -11,6 +11,9 @@ const links = [
   { label: 'Add document', to: '/feed' },
   { label: 'Connect Claude', to: '/connect' }
 ]
+// Document pages (/library/<id>) belong to the Library section of the nav.
+const route = useRoute()
+const inLibrary = computed(() => route.path.startsWith('/library/'))
 
 useHead({
   link: [{ rel: 'icon', type: 'image/svg+xml', href: '/korwell-eye.svg?v=2' }]
@@ -30,6 +33,7 @@ useHead({
             :to="link.to"
             class="underline-offset-[0.35em] hover:underline"
             exact-active-class="underline"
+            :class="{ underline: link.to === '/library' && inLibrary }"
           >
             {{ link.label }}
           </NuxtLink>

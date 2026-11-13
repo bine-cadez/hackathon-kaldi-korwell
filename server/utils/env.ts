@@ -79,6 +79,8 @@ export interface DocLibraryEnv {
   SLACK_SIGNING_SECRET?: string
   SLACK_BOT_TOKEN?: string
   SLACK_CHANNEL_IDS?: string
+  /** "off" disables duplicate upload detection (see duplicates.ts). On by default. */
+  DUPLICATE_CHECK?: string
 }
 
 export function readCloudflareEnv (event: { context: { cloudflare?: { env?: DocLibraryEnv } } }): DocLibraryEnv | undefined {

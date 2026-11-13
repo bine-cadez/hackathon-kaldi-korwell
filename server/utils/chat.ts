@@ -52,10 +52,34 @@ export type ChatEvent =
 
 export class ChatUpstreamError extends Error {
   status: number
-  constructor (status: number, message: string) {
+  /** OpenRouter's own explanation, shown to the user. */
+  detail: string
+  constructor (status: number, message: string, detail = '') {
     super(message)
     this.status = status
+    this.detail = detail
   }
+}
+
+/** Pulls a readable reason out of an OpenRouter error object or body. */
+export function openRouterReason (error: unknown): string {
+  let value = error
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value) as unknown
+    } catch {
+      return value.trim().slice(0, 200)
+    }
+  }
+  const record = value && typeof value === 'object' ? value as { error?: unknown, message?: unknown, metadata?: unknown } : {}
+  if (record.error && typeof record.error === 'object') return openRouterReason(record.error)
+  const parts: string[] = []
+  if (typeof record.message === 'string') parts.push(record.message)
+  const metadata = record.metadata && typeof record.metadata === 'object' ? record.metadata as { provider_name?: unknown, raw?: unknown } : {}
+  if (typeof metadata.provider_name === 'string') parts.push(`provider ${metadata.provider_name}`)
+  if (typeof metadata.raw === 'string' && metadata.raw) parts.push(metadata.raw)
+  else if (metadata.raw && typeof metadata.raw === 'object') parts.push(JSON.stringify(metadata.raw))
+  return parts.join(' · ').slice(0, 300)
 }
 
 export function systemPrompt (today: string, slackAvailable: boolean): string {
@@ -165,7 +189,10 @@ async function streamStep (options: {
   signal?: AbortSignal
   onText: (text: string) => void
 }): Promise<StepResult> {
-  const response = await options.fetchImpl(CHAT_ENDPOINT, {
+  // Call fetch as a plain function. workerd throws "Illegal invocation" when
+  // the global fetch runs with `this` set to another object (here, options).
+  const doFetch = options.fetchImpl
+  const response = await doFetch(CHAT_ENDPOINT, {
     method: 'POST',
     signal: options.signal,
     headers: {
@@ -185,7 +212,7 @@ async function streamStep (options: {
   })
   if (!response.ok || !response.body) {
     const raw = await response.text().catch(() => '')
-    throw new ChatUpstreamError(response.status, `OpenRouter chat failed (${response.status}): ${raw.slice(0, 300)}`)
+    throw new ChatUpstreamError(response.status, `OpenRouter chat failed (${response.status}): ${raw.slice(0, 300)}`, openRouterReason(raw))
   }
 
   let text = ''
@@ -194,7 +221,7 @@ async function streamStep (options: {
   for await (const payload of readSse(response.body)) {
     const chunk = payload as { error?: { message?: string, code?: number }, usage?: unknown, choices?: Array<{ delta?: StreamDelta }> }
     if (chunk.error) {
-      throw new ChatUpstreamError(typeof chunk.error.code === 'number' ? chunk.error.code : 502, `OpenRouter stream error: ${chunk.error.message ?? 'unknown'}`)
+      throw new ChatUpstreamError(typeof chunk.error.code === 'number' ? chunk.error.code : 502, `OpenRouter stream error: ${JSON.stringify(chunk.error).slice(0, 500)}`, openRouterReason(chunk.error))
     }
     if (chunk.usage) usage = chunk.usage
     const delta = chunk.choices?.[0]?.delta
@@ -279,7 +306,7 @@ export interface RunChatOptions {
 }
 
 export async function runChat (options: RunChatOptions): Promise<void> {
-  const fetchImpl = options.fetchImpl ?? fetch
+  const fetchImpl: typeof fetch = options.fetchImpl ?? ((input, init) => fetch(input, init))
   const tools = toChatTools(await listTools(options.library, options.env))
   const slackAvailable = tools.some(tool => tool.function.name === 'search_slack')
   const conversation: ApiMessage[] = [
@@ -335,12 +362,20 @@ export async function runChat (options: RunChatOptions): Promise<void> {
   options.emit({ type: 'done' })
 }
 
-/** Fixed wording for the browser, so upstream error bodies never reach it. */
-export function chatErrorMessage (error: unknown): string {
-  const status = error instanceof ChatUpstreamError ? error.status : null
-  if (status === 401 || status === 403) return 'OpenRouter rejected the API key. Check OPENROUTER_API_KEY.'
-  if (status === 402) return 'The OpenRouter account is out of credits.'
-  if (status === 429) return 'The model is rate limited right now. Wait a moment, then try again.'
-  if (status === 400 || status === 404) return 'The chat model rejected the request. Check CHAT_MODEL.'
-  return 'The answer could not be finished. Try again.'
+/** What the browser shows. Says what went wrong (OpenRouter's reason, or
+ * the error message) so problems can be fixed without reading Worker logs.
+ * The API key is removed. */
+export function chatErrorMessage (error: unknown, secret = ''): string {
+  const redact = (text: string) => (secret ? text.split(secret).join('[redacted]') : text).slice(0, 300)
+  if (!(error instanceof ChatUpstreamError)) {
+    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+    return redact(`The answer could not be finished (${message}). Try again.`)
+  }
+  const reason = error.detail ? ` OpenRouter said: ${error.detail}` : ''
+  const status = error.status
+  if (status === 401 || status === 403) return redact(`OpenRouter rejected the API key. Check OPENROUTER_API_KEY.${reason}`)
+  if (status === 402) return redact(`The OpenRouter account is out of credits.${reason}`)
+  if (status === 429) return redact(`The model is rate limited right now. Wait a moment, then try again.${reason}`)
+  if (status === 400 || status === 404) return redact(`The chat model rejected the request (${status}).${reason}`)
+  return redact(`OpenRouter error ${status}.${reason || ' Try again.'}`)
 }

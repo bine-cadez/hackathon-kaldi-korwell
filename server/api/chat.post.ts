@@ -51,7 +51,7 @@ export default defineEventHandler(async (event) => {
         if (!abort.signal.aborted) {
           const message = error instanceof Error ? error.message.split(apiKey).join('[redacted]') : String(error)
           console.error(JSON.stringify({ message: 'chat_failed', model, error: message.slice(0, 500) }))
-          emit({ type: 'error', message: chatErrorMessage(error) })
+          emit({ type: 'error', message: chatErrorMessage(error, apiKey) })
         }
       } finally {
         try {

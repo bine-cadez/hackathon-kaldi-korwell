@@ -28,6 +28,18 @@ export default defineEventHandler(async (event) => {
       setResponseHeader(event, 'content-type', 'application/json; charset=utf-8')
       return { error: error.code, error_description: error.description }
     }
-    throw error
+    // A body h3 could not parse is the client's fault.
+    const status = (error as { statusCode?: unknown })?.statusCode
+    if (typeof status === 'number' && status >= 400 && status < 500) {
+      setResponseStatus(event, 400)
+      setResponseHeader(event, 'content-type', 'application/json; charset=utf-8')
+      return { error: 'invalid_request', error_description: 'The request body could not be read' }
+    }
+    // D1 or any other failure: answer in OAuth JSON, never fall through to the
+    // HTML unlock page. Details go to the log only.
+    console.error(JSON.stringify({ message: 'mcp_register_failed', error: error instanceof Error ? error.message.slice(0, 300) : 'unknown' }))
+    setResponseStatus(event, 503)
+    setResponseHeader(event, 'content-type', 'application/json; charset=utf-8')
+    return { error: 'server_error', error_description: 'The registration endpoint is temporarily unavailable' }
   }
 })

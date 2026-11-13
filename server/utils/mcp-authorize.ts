@@ -148,7 +148,7 @@ export function formActionSources (redirectUri?: string): string {
   const sources = ["'self'"]
   if (redirectUri && redirectAllowed(redirectUri)) {
     const target = new URL(redirectUri).origin
-    if (/^https?:\/\/[A-Za-z0-9.[\]:-]+$/.test(target)) sources.push(target)
+    if (/^https?:\/\/[A-Za-z0-9.-]+(?::\d{1,5})?$/.test(target)) sources.push(target)
   }
   return sources.join(' ')
 }

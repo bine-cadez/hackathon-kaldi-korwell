@@ -118,10 +118,14 @@ export function redirectAllowed (value: string): boolean {
     return false
   }
   if (url.username || url.password || url.hash || url.search) return false
+  // Hosted clients only on the default port (URL drops an explicit :443 to '').
+  if (url.protocol === 'https:' && url.port) return false
   if (url.protocol === 'https:' && (url.hostname === 'claude.ai' || url.hostname === 'claude.com') && url.pathname === '/api/mcp/auth_callback') return true
   if (url.protocol === 'https:' && url.hostname === 'chatgpt.com' && url.pathname === '/connector_platform_oauth_redirect') return true
   if (url.protocol === 'https:' && url.hostname === 'chatgpt.com' && /^\/connector\/oauth\/[A-Za-z0-9_-]{1,128}$/.test(url.pathname)) return true
-  const loopback = url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]' || url.hostname === '::1')
+  // IPv6 [::1] is not allowed: Chrome rejects it as a CSP form-action source,
+  // so the browser would block the redirect back to the client.
+  const loopback = url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
   if (loopback && (url.pathname === '/callback' || url.pathname === '/oauth/callback')) return true
   return false
 }
@@ -129,7 +133,7 @@ export function redirectAllowed (value: string): boolean {
 export function redirectIsLoopback (value: string): boolean {
   try {
     const url = new URL(value)
-    return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1')
+    return url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1')
   } catch {
     return false
   }
@@ -140,7 +144,7 @@ export function clientLabel (redirectUri: string): string {
     const host = new URL(redirectUri).hostname
     if (host === 'claude.ai' || host === 'claude.com') return 'Claude'
     if (host === 'chatgpt.com') return 'ChatGPT'
-    if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return 'a local app'
+    if (host === 'localhost' || host === '127.0.0.1') return 'a local app'
     return host
   } catch {
     return 'this app'

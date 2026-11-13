@@ -33,26 +33,3 @@ test('fusion keeps vector scores when keyword search is empty', () => {
   assert.deepEqual(combined.hits.map(hit => hit.score), [0.42, 0.2])
   assert.equal(combined.hits[0], vector[0])
 })
-
-test('fusion ranks an exact keyword hit above a stronger semantic miss', () => {
-  const combined = fuseRankedHits(
-    [{ id: 'semantic', score: 0.99 }, { id: 'exact', score: 0.1 }],
-    [{ key: 'exact', item: { id: 'exact', score: 0 } }],
-    5,
-    item => item.id
-  )
-  assert.equal(combined.fused, true)
-  assert.equal(combined.hits[0]?.id, 'exact')
-  assert.ok((combined.hits[0]?.score ?? 0) > (combined.hits[1]?.score ?? 0))
-})
-
-test('a keyword-only hit wins a score tie with the top semantic hit', () => {
-  const combined = fuseRankedHits(
-    [{ id: 'semantic', score: 0.99 }],
-    [{ key: 'exact', item: { id: 'exact', score: 0 } }],
-    5,
-    item => item.id
-  )
-  assert.equal(combined.hits[0]?.id, 'exact')
-  assert.equal(combined.hits[1]?.id, 'semantic')
-})

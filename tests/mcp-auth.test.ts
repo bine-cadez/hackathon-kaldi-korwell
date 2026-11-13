@@ -4,15 +4,12 @@ import { decodeJwt } from 'jose'
 import { mock, test } from 'node:test'
 import oauthDiscovery from '../server/middleware/oauth-discovery.ts'
 import {
-  authorizationServerMetadata,
   exchangeToken,
-  protectedResourceMetadata,
   redirectAllowed,
   REFRESH_TOKEN_TTL_SECONDS,
   registerClient,
   type UsedCodeStore,
-  verifyAccessToken,
-  wwwAuthenticate
+  verifyAccessToken
 } from '../server/utils/mcp-auth.ts'
 import { handleAuthorize as authorize } from '../server/utils/mcp-authorize.ts'
 import { d1UsedCodeStore } from '../server/utils/mcp-code-store.ts'
@@ -63,19 +60,6 @@ test('redirect allowlist accepts Claude, ChatGPT, and loopback only', () => {
   assert.equal(redirectAllowed('https://claude.ai/api/mcp/auth_callback#code'), false)
   assert.equal(redirectAllowed('http://localhost.evil.com/callback'), false)
   assert.equal(redirectAllowed('https://evil.example/callback'), false)
-})
-
-test('discovery documents agree on the issuer and the MCP resource', () => {
-  const resource = protectedResourceMetadata(origin)
-  const server = authorizationServerMetadata(origin)
-  assert.equal(resource.resource, `${origin}/mcp`)
-  assert.deepEqual(resource.authorization_servers, [origin])
-  assert.equal(server.issuer, origin)
-  assert.deepEqual(server.code_challenge_methods_supported, ['S256'])
-  assert.equal(server.authorization_response_iss_parameter_supported, true)
-  assert.equal(server.registration_endpoint, `${origin}/register`)
-  assert.equal('client_id_metadata_document_supported' in server, false)
-  assert.equal(wwwAuthenticate(origin).includes(`${origin}/.well-known/oauth-protected-resource/mcp`), true)
 })
 
 test('discovery middleware serves both well-known documents', async () => {

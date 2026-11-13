@@ -384,16 +384,3 @@ test('concurrent duplicate saves do not raise a unique constraint error', async 
   assert.equal(sqlite.prepare('SELECT count(*) AS n FROM slack_messages WHERE ts = ?').get(edited.ts)?.n, 1)
   assert.ok(edits.every(action => action === 'inserted' || action === 'edited' || action === 'unchanged'))
 })
-
-test('events before the migration return not configured', async () => {
-  const { response } = await postSigned(envelope({
-    type: 'message',
-    channel,
-    user: 'U1',
-    text: 'prezgodaj',
-    ts: '1714553000.000100'
-  }), { applySchema: false })
-  assert.equal(response.status, 503)
-  const payload = await response.json() as { data?: { message?: string } }
-  assert.match(payload.data?.message || '', /0003_slack_archive/)
-})

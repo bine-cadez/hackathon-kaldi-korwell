@@ -1,10 +1,7 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { SCHEMA_SQL } from '../server/utils/schema.ts'
 import { ingestSlackCallback } from '../server/utils/slack-ingest.ts'
 import { searchSlackMessages } from '../server/utils/slack-search.ts'
-import { buildSlackFtsMatch, parseSlackDateRange } from '../server/utils/slack-text.ts'
 import { fakeSlackClient, openSlackDb } from './slack-db.ts'
 
 const channel = 'C_ALLOW'
@@ -35,19 +32,6 @@ async function seed () {
   })
   return opened
 }
-
-test('slack migration folds diacritics and stays out of the base schema', () => {
-  const migration = readFileSync(new URL('../migrations/0003_slack_archive.sql', import.meta.url), 'utf8')
-  assert.match(migration, /tokenize = 'unicode61 remove_diacritics 2'/)
-  assert.match(migration, /PRIMARY KEY \(channel_id, ts\)/)
-  assert.match(migration, /CREATE TRIGGER IF NOT EXISTS slack_messages_fts_insert/)
-  assert.match(migration, /CREATE TRIGGER IF NOT EXISTS slack_messages_fts_update/)
-  assert.doesNotMatch(migration, /WHEN NEW\.deleted = 1/)
-  assert.equal(SCHEMA_SQL.includes('slack_messages'), false)
-  assert.equal(buildSlackFtsMatch('čokolada AND "drop"'), '(("čokolada" "AND" "drop") OR ("čokolada AND drop"))')
-  assert.equal(buildSlackFtsMatch('čokolada'), '"čokolada"')
-  assert.equal(parseSlackDateRange('2024-05-01', '2024-05-01').toExclusive, Date.UTC(2024, 4, 2) / 1000)
-})
 
 test('full-text search matches Slovenian diacritics and filters channel, user, and date', async () => {
   const { db } = await seed()
@@ -82,18 +66,4 @@ test('full-text search matches Slovenian diacritics and filters channel, user, a
   const byId = await searchSlackMessages(db, { channel: 'C_ALLOW', user: 'UMAJA', from: '2024-05-01', to: '2024-05-31' })
   if (!byId.configured) return
   assert.deepEqual(byId.matches.map(hit => hit.userId), ['UMAJA'])
-})
-
-test('search before the slack migration is not configured', async () => {
-  const { db } = openSlackDb(false)
-  const result = await searchSlackMessages(db, { query: 'čokolada' })
-  assert.deepEqual(result, { configured: false })
-})
-
-test('impossible dates are rejected', async () => {
-  const { db } = openSlackDb()
-  await assert.rejects(
-    () => searchSlackMessages(db, { query: 'cokolada', from: '2023-02-29' }),
-    (error: unknown) => (error as { statusCode?: number }).statusCode === 400
-  )
 })

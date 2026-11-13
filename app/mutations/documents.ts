@@ -17,7 +17,8 @@ export interface SavedDocument {
 export function useSaveDocumentMutation () {
   const queryCache = useQueryCache()
   return useMutation({
-    mutation: (input: NewDocument) => $fetch<SavedDocument>('/api/documents', { method: 'POST', body: input }),
+    // JSON for pasted text; FormData when a PDF, Word, Excel, or CSV file is converted on the server.
+    mutation: (input: NewDocument | FormData) => $fetch<SavedDocument>('/api/documents', { method: 'POST', body: input }),
     // Only the list changes; existing document entries stay valid.
     onSettled: () => queryCache.invalidateQueries({ key: DOCUMENT_QUERY_KEYS.root, exact: true })
   })

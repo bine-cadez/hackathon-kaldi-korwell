@@ -40,6 +40,8 @@
       "migrations_dir": "migrations",
     },
   ],
+  // The Workers AI binding (AI) is in nuxt.config.ts (nitro.cloudflare.wrangler),
+  // not here, so `npm run dev` does not need `wrangler login`.
   "vectorize": [
     {
       "binding": "VECTORIZE",

@@ -490,3 +490,10 @@ a.button-link {
   text-decoration: none;
 }
 a.button-link:hover { border-color: var(--accent); }
+
+/* Connect page */
+.copy-field { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.6rem; padding: 0.35rem 0.35rem 0.35rem 0.75rem; border: 1px solid var(--line); background: var(--paper); }
+.copy-field code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 0.9rem; }
+.copy-field button { flex: none; }
+.steps { margin: 0.4rem 0 0.9rem; padding-left: 1.3rem; display: grid; gap: 0.35rem; }
+.archive-page .lede + .card { margin-top: 1.5rem; }

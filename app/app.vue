@@ -18,6 +18,7 @@ useHead({
         <NuxtLink to="/">Search</NuxtLink>
         <NuxtLink to="/library">Library</NuxtLink>
         <NuxtLink to="/feed">Add document</NuxtLink>
+        <NuxtLink to="/connect">Connect Claude</NuxtLink>
       </nav>
       <span v-if="accessEmail" class="archive-account" aria-label="Signed in email">{{ accessEmail }}</span>
     </header>

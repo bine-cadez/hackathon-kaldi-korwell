@@ -1,5 +1,6 @@
+import { extractFileText, titleFromFilename } from '../../utils/document-file'
 import { saveDocument } from '../../utils/documents'
-import { requireEnv, requireOpenRouterApiKey, toHttpError } from '../../utils/env'
+import { readCloudflareEnv, requireEnv, requireOpenRouterApiKey, toHttpError } from '../../utils/env'
 
 async function readDocumentInput (event: Parameters<typeof readBody>[0]) {
   const contentType = getHeader(event, 'content-type') || ''
@@ -15,15 +16,18 @@ async function readDocumentInput (event: Parameters<typeof readBody>[0]) {
     let title = ''
     let body = ''
     let author = ''
+    let file: (typeof parts)[number] | undefined
     for (const part of parts) {
       const text = part.data.toString('utf8')
       if (part.name === 'title') title = text
       if (part.name === 'author') author = text
       if (part.name === 'body' && !body) body = text
-      if (part.name === 'file' && part.data.length > 0) {
-        body = text
-        if (!title && part.filename) title = part.filename.replace(/\.(md|markdown|txt)$/i, '')
-      }
+      if (part.name === 'file' && part.data.length > 0) file = part
+    }
+    if (file) {
+      // PDF, Word, and Excel files are converted to markdown by Workers AI.
+      body = await extractFileText(file, readCloudflareEnv(event)?.AI)
+      if (!title.trim() && file.filename) title = titleFromFilename(file.filename)
     }
     return { title, body, author }
   }

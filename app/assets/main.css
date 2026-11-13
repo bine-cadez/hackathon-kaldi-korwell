@@ -263,6 +263,35 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .chat-answer-body pre { background: var(--color-paper); border-radius: 10px; padding: 0.7rem; overflow-x: auto; }
 .chat-answer-body pre code { background: none; padding: 0; }
 
+/* Library document bodies are rendered markdown (v-html), so they are styled here. */
+.document-body { font-size: 1.125rem; line-height: 1.7; font-weight: 400; overflow-wrap: anywhere; }
+.document-body > :first-child { margin-top: 0; }
+.document-body > :last-child { margin-bottom: 0; }
+.document-body :is(p, ul, ol, blockquote, pre, .document-table) { margin: 0 0 1rem; }
+.document-body :is(h2, h3, h4, h5, h6) { margin: 2rem 0 0.6rem; color: var(--ui-text-highlighted); line-height: 1.25; font-weight: 600; }
+.document-body h2 { font-family: var(--font-serif); font-size: 1.75rem; font-weight: 400; }
+.document-body h3 { font-size: 1.35rem; }
+.document-body h4 { font-size: 1.15rem; }
+.document-body :is(h5, h6) { font-size: 1rem; }
+.document-body :is(ul, ol) { padding-left: 1.4rem; }
+.document-body :is(ul, ol) :is(ul, ol) { margin: 0.25rem 0 0; }
+.document-body li + li { margin-top: 0.25rem; }
+.document-body ul { list-style: disc; }
+.document-body ol { list-style: decimal; }
+.document-body :is(strong, b) { font-weight: 600; }
+.document-body a { color: var(--color-link); text-decoration: underline; text-decoration-color: var(--color-flame-300); text-underline-offset: 0.2em; }
+.document-body blockquote { border-left: 3px solid var(--ui-border-accented); padding-left: 1rem; color: var(--ui-text-muted); }
+.document-body hr { border: 0; border-top: 1px solid var(--ui-border); margin: 2rem 0; }
+.document-body code { font-size: 0.88em; background: var(--color-paper); border-radius: 4px; padding: 0.05rem 0.3rem; }
+.document-body pre { background: var(--color-paper); border-radius: 10px; padding: 0.8rem 1rem; overflow-x: auto; font-size: 0.95rem; line-height: 1.5; }
+.document-body pre code { background: none; padding: 0; overflow-wrap: normal; }
+.document-body img { max-width: 100%; height: auto; border-radius: 6px; }
+.document-body .document-table { overflow-x: auto; border: 1px solid var(--ui-border); border-radius: 8px; }
+.document-body table { border-collapse: collapse; min-width: 100%; font-size: 0.95rem; line-height: 1.45; overflow-wrap: normal; }
+.document-body :is(th, td) { padding: 0.45rem 0.75rem; border-bottom: 1px solid var(--ui-border); text-align: left; vertical-align: top; }
+.document-body th { background: var(--ui-bg-muted); font-weight: 600; color: var(--ui-text-highlighted); white-space: nowrap; }
+.document-body tbody tr:last-child td { border-bottom: 0; }
+
 @keyframes chat-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 .chat-pulse { animation: chat-pulse 1.2s ease-in-out infinite; }
 

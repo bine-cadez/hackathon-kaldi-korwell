@@ -1,9 +1,4 @@
 <script setup lang="ts">
-const accessEmail = useState<string | null>('korwell-access-email', () => {
-  if (import.meta.server) return useRequestEvent()?.context.korwellAccessUser?.email ?? null
-  return null
-})
-
 const links = [
   { label: 'Ask', to: '/' },
   { label: 'Library', to: '/library' },
@@ -38,7 +33,7 @@ useHead({
           </NuxtLink>
         </nav>
         <UButton to="/feed" icon="i-lucide-plus" label="Add document" class="uppercase" :variant="current('/feed') ? 'outline' : 'solid'" />
-        <span v-if="accessEmail" class="text-sm text-muted [overflow-wrap:anywhere]" aria-label="Signed in email">{{ accessEmail }}</span>
+        <UserMenu />
       </AppHeader>
       <NuxtPage />
       <footer class="border-t border-default px-[clamp(1rem,5vw,4.5rem)] py-4 text-sm text-muted">Korwell can make mistakes. The archive is only human.</footer>

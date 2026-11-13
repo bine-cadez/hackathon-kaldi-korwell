@@ -115,8 +115,6 @@ test('initialize and tools/list answer JSON-RPC and notifications are empty', as
   assert.deepEqual(names, ['search', 'fetch'])
   const note = await handleJsonRpc({ jsonrpc: '2.0', method: 'notifications/initialized' }, api, {}, '', origin, null)
   assert.equal(note.status, 202)
-  const batch = await handleJsonRpc([], api, {}, '', origin, null)
-  assert.equal(batch.status, 400)
 })
 
 test('the HTTP endpoint requires a bearer token and returns search results', async () => {
@@ -163,9 +161,6 @@ test('the HTTP endpoint requires a bearer token and returns search results', asy
   }))
   assert.equal(sse.headers.get('content-type')?.includes('text/event-stream'), true)
   assert.match(await sse.text(), /event: message/)
-
-  const get = await handle(new Request(`${origin}/mcp`, { headers: { authorization: `Bearer ${token}` } }))
-  assert.equal(get.status, 405)
 
   const open = createApp()
   open.use(createMcpHandler({

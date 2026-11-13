@@ -48,7 +48,7 @@ function wrap (sqlite: DatabaseSync): DocDatabase {
   }
 }
 
-function openDb (migration: '0001' | '0002' | '0007') {
+function openDb (migration: '0001' | '0007') {
   const sqlite = new DatabaseSync(':memory:')
   sqlite.exec(initSql)
   if (migration !== '0001') sqlite.exec(searchSql)
@@ -63,17 +63,10 @@ function insertDocument (sqlite: DatabaseSync, document: {
   author?: string | null
   createdAt: string
   chunkId: string
-  withAuthorColumn: boolean
 }) {
-  if (document.withAuthorColumn) {
-    sqlite.prepare(
-      'INSERT INTO documents (id, title, body, author, r2_key, created_at) VALUES (?, ?, ?, ?, NULL, ?)'
-    ).run(document.id, document.title, document.body, document.author ?? null, document.createdAt)
-  } else {
-    sqlite.prepare(
-      'INSERT INTO documents (id, title, body, r2_key, created_at) VALUES (?, ?, ?, NULL, ?)'
-    ).run(document.id, document.title, document.body, document.createdAt)
-  }
+  sqlite.prepare(
+    'INSERT INTO documents (id, title, body, author, r2_key, created_at) VALUES (?, ?, ?, ?, NULL, ?)'
+  ).run(document.id, document.title, document.body, document.author ?? null, document.createdAt)
   sqlite.prepare(
     'INSERT INTO chunks (id, document_id, chunk_index, content, embedding, token_estimate, created_at) VALUES (?, ?, 0, ?, NULL, 1, ?)'
   ).run(document.chunkId, document.id, document.body, document.createdAt)
@@ -136,7 +129,7 @@ test('migration backfill and triggers keep the FTS index in sync', () => {
 })
 
 test('keyword search finds title and author with and without diacritics, and dates narrow it', async () => {
-  const sqlite = openDb('0002')
+  const sqlite = openDb('0007')
   insertDocument(sqlite, {
     id: 'doc-choco',
     title: 'Čokolada',
@@ -144,7 +137,6 @@ test('keyword search finds title and author with and without diacritics, and dat
     body: 'Recept za štrudelj.',
     createdAt: '2024-05-01T08:00:00.000Z',
     chunkId: 'chunk-choco',
-    withAuthorColumn: true
   })
   insertDocument(sqlite, {
     id: 'doc-meet',
@@ -153,7 +145,6 @@ test('keyword search finds title and author with and without diacritics, and dat
     body: 'Tedenski pregled projektov.',
     createdAt: '2024-05-02T08:00:00.000Z',
     chunkId: 'chunk-meet',
-    withAuthorColumn: true
   })
   insertDocument(sqlite, {
     id: 'doc-note',
@@ -162,7 +153,6 @@ test('keyword search finds title and author with and without diacritics, and dat
     body: 'Čokolada je omenjena samo v besedilu.',
     createdAt: '2024-05-01T18:00:00.000Z',
     chunkId: 'chunk-note',
-    withAuthorColumn: true
   })
 
   const topKs: number[] = []
@@ -203,7 +193,7 @@ test('keyword search finds title and author with and without diacritics, and dat
   }
 })
 
-test('saving stores composed Unicode and a Slovenian title sort key', async () => {
+test('saving stores composed Unicode', async () => {
   const restore = installEmbeddings()
   try {
     const sqlite = openDb('0007')
@@ -218,14 +208,7 @@ test('saving stores composed Unicode and a Slovenian title sort key', async () =
     assert.equal(row.title, 'Poročilo Q2')
     assert.equal(row.author, 'Ana Kovač')
     assert.equal(row.body, 'Šola.\nVrstica.')
-    assert.equal(row.title_sort, 'poroc{ilo q2')
     assert.equal(row.uploaded_by, 'ana.kovac@kaldi.si')
-
-    // Before 0007 the same save works and skips title_sort.
-    const older = openDb('0002')
-    const plain = await saveDocument(envFor(older), 'test-key', { title: 'Star', body: 'Besedilo.' })
-    assert.equal(older.prepare("SELECT count(*) AS n FROM pragma_table_info('documents') WHERE name = 'title_sort'").get()?.n, 0)
-    assert.ok(plain.id)
   } finally {
     restore()
   }

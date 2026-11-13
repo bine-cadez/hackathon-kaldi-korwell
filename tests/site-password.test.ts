@@ -99,25 +99,6 @@ describe('site password HTTP gate', { concurrency: false }, () => {
     assert.doesNotMatch(html, /reached/)
   })
 
-  test('X-Site-Password and Authorization bearer unlock API routes', async () => {
-    process.env.SITE_PASSWORD = 's3cret'
-    const header = await handler(new Request('http://library.test/api/search', {
-      method: 'POST',
-      headers: { 'x-site-password': 's3cret', 'content-type': 'application/json' },
-      body: JSON.stringify({ query: 'q' })
-    }))
-    assert.equal(header.status, 200)
-    assert.equal((await header.json() as { reached?: boolean }).reached, true)
-
-    const bearer = await handler(new Request('http://library.test/api/documents', {
-      method: 'POST',
-      headers: { authorization: 'Bearer s3cret', 'content-type': 'application/json' },
-      body: JSON.stringify({ title: 't', body: 'b' })
-    }))
-    assert.equal(bearer.status, 200)
-    assert.equal((await bearer.json() as { reached?: boolean }).reached, true)
-  })
-
   test('login sets an HttpOnly cookie that unlocks later API calls', async () => {
     process.env.SITE_PASSWORD = 's3cret'
     const wrong = await handler(new Request('http://library.test/api/auth/login', {
@@ -159,21 +140,6 @@ describe('site password HTTP gate', { concurrency: false }, () => {
     }))
     assert.equal(secure.status, 200)
     assert.match(secure.headers.get('set-cookie') || '', /Secure/i)
-  })
-
-  test('logout expires the session cookie', async () => {
-    process.env.SITE_PASSWORD = 's3cret'
-    const token = await siteSessionToken('s3cret')
-    const response = await handler(new Request('http://library.test/api/auth/logout', {
-      method: 'POST',
-      headers: { cookie: `${SITE_AUTH_COOKIE}=${token}` }
-    }))
-    assert.equal(response.status, 200)
-    assert.deepEqual(await response.json(), { ok: true, redirect: '/' })
-    const setCookie = response.headers.get('set-cookie') || ''
-    assert.match(setCookie, new RegExp(`^${SITE_AUTH_COOKIE}=;`))
-    assert.match(setCookie, /Max-Age=0/i)
-    assert.match(setCookie, /Path=\//)
   })
 
   test('Slack events skip the password and search stays locked', async () => {

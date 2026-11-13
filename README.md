@@ -293,6 +293,7 @@ server/middleware/      X-Robots-Tag, the shared-password / Access gate, OAuth d
 server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes, FTS and date helpers, Slack archive, MCP tools
 app/pages/index.vue     document search (date, title, author filters) and the Slack search tab
 app/pages/feed.vue      paste/upload, including optional author
+app/pages/connect.vue   MCP server URL and Claude connector setup steps
 ```
 
 ## Kaldi email sign-in with Cloudflare Access

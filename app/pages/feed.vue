@@ -1,10 +1,10 @@
 <script setup lang="ts">
-// PDF, Word, and Excel files are sent as-is and converted to markdown on the server.
-const CONVERTIBLE = /\.(pdf|docx|xlsx|xlsm|xlsb|xls)$/i
+// PDF, Word, Excel, and CSV files are sent as-is and converted to text on the server.
+const CONVERTIBLE = /\.(pdf|docx|xlsx|xlsm|xlsb|xls|csv)$/i
 const TEXT = /\.(md|markdown|txt)$/i
 const TEXT_MAX_BYTES = 250_000
 const FILE_MAX_BYTES = 10 * 1024 * 1024
-const ACCEPT = '.md,.markdown,.txt,.pdf,.docx,.xlsx,.xlsm,.xlsb,.xls,text/plain,text/markdown,application/pdf'
+const ACCEPT = '.md,.markdown,.txt,.pdf,.docx,.xlsx,.xlsm,.xlsb,.xls,.csv,text/plain,text/markdown,application/pdf,text/csv'
 
 const title = ref('')
 const author = ref('')
@@ -106,7 +106,7 @@ async function saveDocument () {
             />
           </label>
           <label>
-            Or upload .md / .txt / .pdf / .docx / .xlsx
+            Or upload .md / .txt / .pdf / .docx / .xlsx / .csv
             <input ref="fileInput" type="file" :accept="ACCEPT" @change="onFile">
           </label>
           <p v-if="convertFile" class="row">

@@ -1,9 +1,11 @@
 import { createError } from 'h3'
+import { csvToText } from './csv.ts'
 import type { ConversionResult, WorkersAI } from './env.ts'
 
 // Plain-text uploads are decoded as UTF-8. Everything in CONVERTIBLE_TYPES goes
 // through Workers AI toMarkdown first, so the rest of the pipeline only sees text.
-export const TEXT_EXTENSIONS = ['md', 'markdown', 'txt'] as const
+// CSV is decoded as text and then rewritten one row per paragraph (see csv.ts).
+export const TEXT_EXTENSIONS = ['md', 'markdown', 'txt', 'csv'] as const
 
 export const CONVERTIBLE_TYPES: Record<string, string> = {
   pdf: 'application/pdf',
@@ -45,6 +47,7 @@ export async function extractFileText (file: UploadedFile, ai: WorkersAI | undef
   if (file.data.byteLength > FILE_MAX_BYTES) {
     fail(413, `File must be ${FILE_MAX_BYTES / 1024 / 1024} MB or smaller`)
   }
+  if (fileExtension(file.filename) === 'csv') return csvFileText(file)
   if (!isConvertible(file.filename)) return decodeText(file)
   return convertToMarkdown(file, ai)
 }
@@ -56,6 +59,12 @@ function decodeText (file: UploadedFile): string {
     const supported = [...TEXT_EXTENSIONS, ...Object.keys(CONVERTIBLE_TYPES)].map(ext => `.${ext}`).join(', ')
     fail(415, 'Unsupported file type', `${file.filename || 'This file'} is not a supported type. Upload ${supported}.`)
   }
+  return text
+}
+
+function csvFileText (file: UploadedFile): string {
+  const text = csvToText(decodeText(file))
+  if (!text) fail(422, 'No rows found in CSV', `${file.filename} has a header but no data rows.`)
   return text
 }
 

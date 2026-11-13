@@ -11,12 +11,28 @@ const request = useRequestFetch()
 const { data: documents, error: listError, asyncStatus: listAsyncStatus, refetch: retryList } = useQuery(() => documentListQuery(request))
 const refreshing = computed(() => listAsyncStatus.value === 'loading' && !!documents.value)
 
-const selectedId = ref<string | null>(null)
+// /library?document=<id> opens that document. The upload page redirects here
+// after a save, and MCP search results cite this URL.
+const route = useRoute()
+const queryDocumentId = () => typeof route.query.document === 'string' && route.query.document ? route.query.document : null
+const selectedId = ref<string | null>(queryDocumentId())
+watch(queryDocumentId, (id) => { if (id) selectedId.value = id })
 const { data: selected, error: detailError, isPending: detailPending, asyncStatus: detailAsyncStatus, refetch: retryDetail } = useQuery(() => ({
   ...documentByIdQuery({ id: selectedId.value ?? '', request }),
   enabled: !!selectedId.value
 }))
 const selectedSummary = computed(() => documents.value?.find(document => document.id === selectedId.value))
+
+// Bring a document opened from the URL into view; it renders below the list.
+const detailCard = ref<HTMLElement | null>(null)
+let scrollPending = !!selectedId.value
+watch(selected, async (doc) => {
+  if (!import.meta.client || !scrollPending || !doc || doc.id !== queryDocumentId()) return
+  scrollPending = false
+  await nextTick()
+  detailCard.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}, { immediate: true, flush: 'post' })
+watch(queryDocumentId, (id) => { if (id) scrollPending = true })
 
 // Optimistic: the row disappears at once and comes back if the server refuses.
 const {
@@ -62,7 +78,7 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
         <NuxtLink class="ghost button-link" to="/feed">Add the first document</NuxtLink>
       </div>
       <ul v-else-if="documents" class="doc-list">
-        <li v-for="document in documents" :key="document.id">
+        <li v-for="document in documents" :key="document.id" :class="{ 'is-selected': selectedId === document.id }">
           <div>
             <button
               class="link"
@@ -99,7 +115,7 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
       />
     </article>
     <template v-else-if="selectedId">
-      <article v-if="selected" class="card">
+      <article v-if="selected" ref="detailCard" class="card doc-detail">
         <h2>{{ selected.title }}</h2>
         <p v-if="selected.author" class="meta">{{ selected.author }}</p>
         <pre class="body">{{ selected.body }}</pre>
@@ -113,3 +129,8 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
     </template>
   </main>
 </template>
+
+<style scoped>
+.doc-list li.is-selected .link { font-weight: 700; text-decoration: underline; }
+.doc-detail { scroll-margin-top: 1rem; }
+</style>

@@ -1,12 +1,12 @@
 import { createError } from 'h3'
-import { csvToText } from './csv.ts'
+import { csvToText } from '../../shared/utils/csv.ts'
 import { decodeTextBytes } from '../../shared/utils/text.ts'
 import type { ConversionResult, WorkersAI } from './env.ts'
 
 // Plain-text uploads are decoded as UTF-8, or Windows-1250 / ISO-8859-2 when the
 // bytes are not valid UTF-8 (shared/utils/text.ts). Everything in CONVERTIBLE_TYPES goes
 // through Workers AI toMarkdown first, so the rest of the pipeline only sees text.
-// CSV is decoded as text and then rewritten one row per paragraph (see csv.ts).
+// CSV is decoded as text and then rewritten one row per paragraph (see shared/utils/csv.ts).
 export const TEXT_EXTENSIONS = ['md', 'markdown', 'txt', 'csv'] as const
 
 export const CONVERTIBLE_TYPES: Record<string, string> = {

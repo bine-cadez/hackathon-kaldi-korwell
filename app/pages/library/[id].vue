@@ -4,6 +4,7 @@ import { useDeleteDocumentMutation } from '~/mutations/documents'
 import { DOCUMENT_QUERY_KEYS, documentByIdQuery, type DocumentPage, type LibraryDocument } from '~/queries/documents'
 import { renderDocumentMarkdown } from '~/utils/documentMarkdown'
 import { formatFileSize } from '~/utils/libraryFilters'
+import { sourcePreviewKind } from '~/utils/sourcePreview'
 
 // One page per document: /library/<id>, shown in the Library's reader pane.
 // Linked from the list, from the upload form after a save, from Ask answers,
@@ -44,6 +45,16 @@ const fileLabel = computed(() => {
 })
 
 const bodyHtml = computed(() => renderDocumentMarkdown(document.value?.body ?? ''))
+
+// PDFs, CSV, and Excel open on the original file. The extracted text (what
+// search and Ask see) is one tab away. Other documents show only the text.
+const hasPreview = computed(() => Boolean(sourcePreviewKind(document.value?.source?.filename)))
+const view = ref<'original' | 'text'>('original')
+const viewTabs = [
+  { label: 'Original', value: 'original', icon: 'i-lucide-file' },
+  { label: 'Extracted text', value: 'text', icon: 'i-lucide-text' }
+]
+watch(id, () => { view.value = 'original' })
 
 const { mutateAsync: deleteDocument, error: deleteError, isLoading: deleting, reset: dismissDeleteError } = useDeleteDocumentMutation()
 async function removeDocument ({ confirmFirst = true } = {}) {
@@ -119,8 +130,17 @@ async function removeDocument ({ confirmFirst = true } = {}) {
         @dismiss="dismissDeleteError()"
       />
 
+      <UTabs
+        v-if="hasPreview"
+        v-model="view"
+        :items="viewTabs"
+        :content="false"
+        variant="link"
+        class="mt-4"
+      />
+      <DocumentSourcePreview v-if="hasPreview && view === 'original'" :source="document.source!" class="mt-6" />
       <!-- Escaped and link-checked by renderDocumentMarkdown, so v-html is safe here. -->
-      <div class="document-body mt-6 max-w-[42rem]" v-html="bodyHtml" />
+      <div v-else class="document-body mt-6 max-w-[42rem]" v-html="bodyHtml" />
     </template>
 
     <template v-else-if="isPending">

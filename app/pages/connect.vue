@@ -30,6 +30,7 @@ async function copy (value: string) {
   <main>
     <section class="studio-section" aria-labelledby="connect-title">
       <div>
+        <ArchiveEye class="mx-0 mb-6 w-36" />
         <p class="eyebrow">Connect Claude</p>
         <h1 id="connect-title" class="mt-4 text-[2rem] leading-tight font-light">Search Korwell from inside Claude.</h1>
       </div>

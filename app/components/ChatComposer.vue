@@ -3,10 +3,43 @@
 // the pill docked under the conversation. Enter sends, Shift+Enter adds a line.
 const model = defineModel<string>({ required: true })
 const props = defineProps<{ streaming: boolean, large?: boolean, placeholder: string }>()
-const emit = defineEmits<{ submit: [], stop: [] }>()
+const emit = defineEmits<{ submit: [], stop: [], caret: [x: number, y: number] }>()
 
 const field = ref<{ textareaRef: HTMLTextAreaElement | null } | null>(null)
 defineExpose({ focus: () => field.value?.textareaRef?.focus() })
+
+// Where the caret is on screen, so the eye can watch you type. A textarea does
+// not report it, so a hidden copy of the text up to the caret is measured.
+const MIRRORED = ['boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'fontFamily', 'fontSize', 'fontStyle', 'fontWeight', 'letterSpacing', 'lineHeight', 'textTransform', 'wordSpacing', 'tabSize'] as const
+let caretFrame = 0
+let mirror: HTMLDivElement | null = null
+
+function trackCaret () {
+  cancelAnimationFrame(caretFrame)
+  caretFrame = requestAnimationFrame(() => {
+    const input = field.value?.textareaRef
+    if (!input || document.activeElement !== input) return
+    const style = getComputedStyle(input)
+    mirror ??= document.body.appendChild(document.createElement('div'))
+    Object.assign(mirror.style, { position: 'absolute', top: '0', left: '-9999px', visibility: 'hidden', whiteSpace: 'pre-wrap', overflowWrap: 'break-word' })
+    for (const property of MIRRORED) mirror.style[property] = style[property]
+    const caret = (input.selectionDirection === 'backward' ? input.selectionStart : input.selectionEnd) ?? 0
+    mirror.textContent = input.value.slice(0, caret)
+    const marker = mirror.appendChild(document.createElement('span'))
+    marker.textContent = '​'
+    const bounds = input.getBoundingClientRect()
+    emit('caret',
+      Math.min(bounds.right, bounds.left + marker.offsetLeft - input.scrollLeft),
+      Math.min(bounds.bottom, bounds.top + marker.offsetTop - input.scrollTop + marker.offsetHeight / 2))
+  })
+}
+
+onMounted(() => document.addEventListener('selectionchange', trackCaret))
+onBeforeUnmount(() => {
+  document.removeEventListener('selectionchange', trackCaret)
+  cancelAnimationFrame(caretFrame)
+  mirror?.remove()
+})
 
 function onKeydown (event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
@@ -40,6 +73,8 @@ function onKeydown (event: KeyboardEvent) {
       :placeholder="placeholder"
       :ui="{ base: 'resize-none px-1 text-[1.0625rem] leading-relaxed placeholder:text-dimmed' }"
       @keydown="onKeydown"
+      @input="trackCaret"
+      @focus="trackCaret"
     />
     <div class="flex items-center gap-3 text-sm text-muted">
       <span v-if="props.large" class="ps-1">Searches documents and Slack</span>

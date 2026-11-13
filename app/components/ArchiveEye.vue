@@ -4,7 +4,9 @@
 // alarmed by an error. Only the lid and pupil move; the drawing stays the same.
 type EyeMood = 'idle' | 'hungry' | 'reading' | 'pleased' | 'alarmed'
 // `appetite` (0 to 1) widens the pupil a little as the archive fills.
-const props = defineProps<{ noResults?: boolean, searching?: boolean, blackHole?: boolean, mood?: EyeMood, appetite?: number }>()
+// `arrive`: on the first full page load of a visit, the eye flies out of the
+// header logo to its place, so people notice it.
+const props = defineProps<{ noResults?: boolean, searching?: boolean, blackHole?: boolean, mood?: EyeMood, appetite?: number, arrive?: boolean }>()
 const moodClass = computed(() => props.mood && props.mood !== 'idle' && !props.blackHole ? `mood-${props.mood}` : undefined)
 const pupilGrow = computed(() => Math.max(0, Math.min(1, props.appetite ?? 0)) * 0.12)
 const closed = ref(false)
@@ -63,7 +65,54 @@ function followPointer (event: PointerEvent) {
 
 defineExpose({ lookAt, blink })
 
+const nuxtApp = useNuxtApp() as ReturnType<typeof useNuxtApp> & { $isFirstPage?: () => boolean }
+const arrivedKey = 'korwell-eye-arrived'
+let arrival: Animation | undefined
+let arrivalTimer: ReturnType<typeof setTimeout> | undefined
+
+// Only on a full page load (later visits get the page-to-page glide instead),
+// and once per tab.
+function arriveFromLogo () {
+  const svg = eye.value
+  const logo = document.querySelector('.logo-eye')
+  if (!svg || !logo || logo === svg || motion?.matches || typeof svg.animate !== 'function') return
+  try {
+    if (sessionStorage.getItem(arrivedKey)) return
+    sessionStorage.setItem(arrivedKey, '1')
+  } catch {
+    // Without storage it plays on every full load, which is fine.
+  }
+  const from = logo.getBoundingClientRect()
+  const to = svg.getBoundingClientRect()
+  if (!from.width || !to.width) return
+  const dx = from.left - to.left
+  const dy = from.top - to.top
+  const scale = from.width / to.width
+  // It leaves the logo, swoops down past the middle of the line, then settles.
+  const mid = scale + (1 - scale) * 0.75
+  svg.style.position = 'relative'
+  svg.style.zIndex = '30'
+  svg.style.transformOrigin = '0 0'
+  arrival = svg.animate([
+    { transform: `translate(${dx}px, ${dy}px) scale(${scale})`, opacity: 0.85 },
+    { offset: 0.62, transform: `translate(${dx * 0.28}px, ${dy * 0.42 + 26}px) scale(${mid})`, opacity: 1 },
+    { transform: 'none', opacity: 1 }
+  ], { duration: 1500, delay: 350, easing: 'cubic-bezier(0.55, 0, 0.3, 1)', fill: 'backwards' })
+  arrival.finished.then(() => {
+    svg.style.removeProperty('position')
+    svg.style.removeProperty('z-index')
+    svg.style.removeProperty('transform-origin')
+    blink()
+  }, () => {})
+}
+
 onMounted(() => {
+  if (props.arrive && nuxtApp.$isFirstPage?.()) {
+    // Wait for the page's layout to settle before measuring where the eye lands.
+    // A timer, not requestAnimationFrame: frames can be held back while loading.
+    motion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    arrivalTimer = setTimeout(arriveFromLogo, 60)
+  }
   blinkOffset.value = `-${(Math.random() * 19).toFixed(2)}s`
   motion = window.matchMedia('(prefers-reduced-motion: reduce)')
   motion.addEventListener('change', resetGaze)
@@ -73,6 +122,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearTimeout(arrivalTimer)
+  arrival?.cancel()
   clearTimeout(blinkTimer)
   motion?.removeEventListener('change', resetGaze)
   window.removeEventListener('pointermove', followPointer)

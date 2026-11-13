@@ -239,7 +239,22 @@ const pairs = computed(() => turns.value.flatMap((turn, index) => {
 const asking = useState('korwell-asking', () => false)
 watch(streaming, (value) => { asking.value = value })
 
+// The eye watches the caret while you type a question.
+const askEye = ref<{ lookAt: (x: number, y: number) => void } | null>(null)
+
+// A different Orwell line under the eye on each visit (archiveQuotes.ts).
+const archiveQuote = ref('')
+
 onMounted(() => {
+  const key = 'korwell-archive-quote'
+  let index = 0
+  try {
+    index = (Number(sessionStorage.getItem(key) ?? -1) + 1) % archiveQuotes.length
+    sessionStorage.setItem(key, String(index))
+  } catch {
+    index = Math.floor(Math.random() * archiveQuotes.length)
+  }
+  archiveQuote.value = archiveQuotes[index] ?? archiveQuotes[0]!
   composer.value?.focus()
   if (turns.value.length) end.value?.scrollIntoView({ block: 'end' })
 })
@@ -252,6 +267,8 @@ onBeforeUnmount(() => {
 <template>
   <main class="flex flex-col">
     <section v-if="!turns.length" class="flex flex-1 flex-col items-center justify-center px-4 pt-16 pb-20 text-center" aria-labelledby="ask-title">
+      <ArchiveEye ref="askEye" class="mb-0" :searching="streaming" arrive />
+      <p class="eyebrow mx-auto mt-3 mb-4 min-h-[1.5em] max-w-xl leading-normal text-muted"><q v-if="archiveQuote">{{ archiveQuote }}</q></p>
       <h1 id="ask-title" class="text-[clamp(2.4rem,6vw,3.6rem)] leading-tight font-light">What do you want to know?</h1>
       <p class="mt-3 max-w-xl text-lg leading-relaxed text-muted">Korwell searches Kaldi’s documents and Slack, and links every answer to its sources.</p>
       <ChatComposer
@@ -261,6 +278,7 @@ onBeforeUnmount(() => {
         class="mt-10 w-[min(46rem,100%)] text-left"
         :streaming="streaming"
         placeholder="Ask about a project, a decision, a person…"
+        @caret="(x, y) => askEye?.lookAt(x, y)"
         @submit="ask(draft)"
         @stop="stop"
       />

@@ -298,25 +298,25 @@ onBeforeUnmount(stop)
     <div ref="end" class="chat-end" />
 
     <form class="chat-composer" @submit.prevent="ask(draft)">
-      <label class="sr-only" for="chat-input">Ask Korwell</label>
-      <textarea
-        id="chat-input"
-        ref="input"
-        v-model="draft"
-        rows="1"
-        maxlength="8000"
-        enterkeyhint="send"
-        placeholder="Ask about a project, a decision, a person…"
-        @keydown="onKeydown"
-      />
-      <button v-if="streaming" class="chat-send" type="button" aria-label="Stop answering" title="Stop" @click="stop">
-        <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor" /></svg>
-      </button>
-      <button v-else class="chat-send" type="submit" :disabled="!draft.trim()" aria-label="Send" title="Send (Enter)">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M5 12h13m-5-6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
+      <div class="search-bar">
+        <label class="sr-only" for="chat-input">Ask Korwell</label>
+        <textarea
+          id="chat-input"
+          ref="input"
+          v-model="draft"
+          rows="1"
+          maxlength="8000"
+          enterkeyhint="send"
+          placeholder="Ask about a project, a decision, a person…"
+          @keydown="onKeydown"
+        />
+        <button v-if="streaming" class="search-submit" type="button" aria-label="Stop answering" title="Stop" @click="stop">
+          <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="1.5" fill="currentColor" /></svg>
+        </button>
+        <button v-else class="search-submit" type="submit" :disabled="!draft.trim()" aria-label="Ask Korwell" title="Ask Korwell (Enter)">
+          <SearchIcon />
+        </button>
+      </div>
     </form>
     <ul v-if="!turns.length" class="chat-suggestions" aria-label="Example questions">
       <li v-for="suggestion in suggestions" :key="suggestion">

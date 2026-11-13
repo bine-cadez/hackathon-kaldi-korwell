@@ -33,7 +33,9 @@
   --warn: #8a341f;
   --ok: #1f6b3a;
   --shadow: 0 1px 0 rgba(28, 25, 21, 0.04);
-  font-family: "Passenger Sans", "Segoe UI", "Helvetica Neue", sans-serif;
+  --font-body: "Passenger Sans", "Segoe UI", "Helvetica Neue", sans-serif;
+  --font-heading: "Tiempos Headline", Georgia, serif;
+  font-family: var(--font-body);
   color: var(--ink);
   background: var(--paper);
 }
@@ -50,6 +52,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 button { cursor: pointer; }
 
+:is(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .shell {
   width: min(1120px, calc(100% - 2rem));
   margin: 0 auto;
@@ -65,7 +72,7 @@ header.top {
 }
 
 h1, h2, h3 {
-  font-family: "Tiempos Headline", Georgia, serif;
+  font-family: var(--font-heading);
   font-weight: 600;
   letter-spacing: -0.02em;
   margin: 0;
@@ -167,7 +174,7 @@ button:disabled { opacity: 0.6; cursor: progress; }
 pre.body, .chunk {
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: "Passenger Sans", "Segoe UI", sans-serif;
+  font-family: var(--font-body);
   line-height: 1.5;
   margin: 0.5rem 0 0;
 }
@@ -193,13 +200,14 @@ pre.body, .chunk {
 
 .archive-header nav { display: flex; flex-wrap: wrap; gap: 0.5rem 1.5rem; }
 .archive-header a { color: inherit; text-decoration: none; }
+.archive-header a:focus-visible { outline-color: var(--accent-ink); }
 .archive-header nav a:hover,
 .archive-header nav a.router-link-exact-active,
 .archive-header nav a.is-current-section { text-decoration: underline; text-underline-offset: 0.35em; }
 
 .archive-brand,
 .search-hero h1 {
-  font-family: "Tiempos Headline", Georgia, serif;
+  font-family: var(--font-heading);
   font-weight: 600;
 }
 
@@ -222,7 +230,7 @@ pre.body, .chunk {
 
 .search-hero { text-align: center; }
 .archive-eye { display: block; width: clamp(9rem, 28vw, 13rem); height: auto; margin: 0 auto 1.25rem; }
-.eyebrow { color: var(--accent); font: 700 0.75rem/1.4 "Passenger Sans", sans-serif; text-transform: uppercase; letter-spacing: 0.2em; }
+.eyebrow { color: var(--accent); font: 700 0.75rem/1.4 var(--font-body); text-transform: uppercase; letter-spacing: 0.2em; }
 .search-hero h1 { color: var(--accent); font-size: clamp(4rem, 13vw, 7.5rem); line-height: 1; margin: 0 0 1.35rem; }
 .search-form { display: grid; gap: 0.85rem; }
 .search-bar {
@@ -274,11 +282,6 @@ pre.body, .chunk {
   filter: invert(23%) sepia(29%) saturate(1375%) hue-rotate(359deg) brightness(89%);
 }
 
-.search-page :is(button, input):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
 input[type="checkbox"] {
   inline-size: 1rem;
   block-size: 1rem;
@@ -299,7 +302,7 @@ input[type="checkbox"] {
 
 .search-filter-note { margin: 0; text-align: start; font-size: 0.85rem; }
 .doc-list .meta, .result .meta { margin: 0.2rem 0 0; font-size: 0.85rem; }
-.search-bar input { flex: 1; min-width: 0; width: 100%; border: 0; background: transparent; padding: 0.7rem; }
+.search-bar :is(input, textarea) { flex: 1; min-width: 0; width: 100%; border: 0; background: transparent; padding: 0.7rem; }
 .search-bar button { border: 0; padding: 0.7rem clamp(0.7rem, 3vw, 1.5rem); background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 .search-results { margin-top: 2rem; padding-top: 1rem; border-top: 3px double var(--line); }
 .search-results .card { margin-top: 1rem; }
@@ -324,6 +327,7 @@ input[type="checkbox"] {
 }
 
 .search-bar .search-submit:hover:not(:disabled) { background: var(--paper); }
+.search-bar .search-submit:disabled { cursor: default; opacity: 0.45; }
 
 .query-feedback {
   margin: 0.65rem 0 0;
@@ -339,7 +343,7 @@ input[type="checkbox"] {
   outline-offset: 2px;
 }
 
-.search-bar input:focus-visible { outline: none; }
+.search-bar :is(input, textarea):focus-visible { outline: none; }
 
 .search-bar input::-webkit-search-cancel-button { appearance: none; }
 
@@ -552,7 +556,7 @@ textarea::placeholder {
 /* Error page (app/error.vue). */
 .error-page { text-align: center; }
 .error-page .archive-eye { margin-inline: auto; }
-.error-page .error-code { margin: 0.5rem 0 0; color: var(--muted); font: 700 0.8rem/1.4 "Passenger Sans", sans-serif; letter-spacing: 0.2em; text-transform: uppercase; }
+.error-page .error-code { margin: 0.5rem 0 0; color: var(--muted); font: 700 0.8rem/1.4 var(--font-body); letter-spacing: 0.2em; text-transform: uppercase; }
 .error-page .lede { max-width: 32rem; margin: 0.75rem auto 1.5rem; }
 
 .empty-state { display: grid; gap: 0.6rem; justify-items: start; margin-top: 0.5rem; }
@@ -567,7 +571,7 @@ a.button-link {
 a.button-link:hover { border-color: var(--accent); }
 
 /* Connect page */
-.copy-field { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.6rem; padding: 0.35rem 0.35rem 0.35rem 0.75rem; border: 1px solid var(--line); background: var(--paper); }
+.copy-field { display: flex; gap: 0.5rem; align-items: center; margin-top: 0.6rem; padding: 0.35rem 0.35rem 0.35rem 0.75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); }
 .copy-field code { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 0.9rem; }
 .copy-field button { flex: none; }
 .steps { margin: 0.4rem 0 0.9rem; padding-left: 1.3rem; display: grid; gap: 0.35rem; }
@@ -731,12 +735,10 @@ a.doc-link:focus-visible, .result h3 a:focus-visible, a.back-link:focus-visible 
 .chat-stopped { margin: 0.5rem 0 0; font-size: 0.85rem; }
 .chat-answer > .error-state:first-child { margin-top: 0; }
 .chat-end { height: 1px; }
-.chat-composer { position: sticky; bottom: 0; display: flex; gap: 0.45rem; align-items: flex-end; margin-top: auto; padding: 1rem 0 1.25rem; background: linear-gradient(to bottom, transparent, var(--paper) 1rem); }
+.chat-composer { position: sticky; bottom: 0; display: block; margin-top: auto; padding: 1rem 0 1.25rem; background: linear-gradient(to bottom, transparent, var(--paper) 1rem); }
 .chat-page--empty .chat-composer { position: static; margin-top: 0; padding-top: 0; background: none; }
-.chat-composer textarea { flex: 1; min-height: 3.1rem; max-height: 12rem; field-sizing: content; resize: none; border: 1px solid var(--accent); border-radius: 0; background: var(--card); padding: 0.8rem 0.9rem; line-height: 1.4; }
-.chat-composer textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.chat-send { flex: none; display: grid; place-items: center; width: 3.1rem; height: 3.1rem; border: 0; background: var(--accent); color: var(--accent-ink); }
-.chat-send:disabled { opacity: 0.45; cursor: not-allowed; }
+.chat-composer .search-bar { align-items: flex-end; }
+.chat-composer .search-bar textarea { min-height: 2.75rem; max-height: 12rem; field-sizing: content; resize: none; line-height: 1.4; }
 @media (prefers-reduced-motion: reduce) {
   .chat-thinking > span, .chat-tools li.is-pending .chat-tool-icon { animation: none; }
 }

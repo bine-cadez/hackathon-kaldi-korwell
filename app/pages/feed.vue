@@ -1,5 +1,6 @@
 <script setup lang="ts">
 const title = ref('')
+const author = ref('')
 const body = ref('')
 const saving = ref(false)
 const saveMessage = ref('')
@@ -31,10 +32,11 @@ async function saveDocument () {
   try {
     const saved = await $fetch<{ title: string, chunkCount: number, r2Key: string | null }>('/api/documents', {
       method: 'POST',
-      body: { title: title.value, body: body.value }
+      body: { title: title.value, author: author.value, body: body.value }
     })
     saveMessage.value = `Saved “${saved.title}” to the archive.`
     title.value = ''
+    author.value = ''
     body.value = ''
     if (fileInput.value) fileInput.value.value = ''
   } catch (error) {
@@ -55,6 +57,10 @@ async function saveDocument () {
           <label>
             Title
             <input v-model="title" type="text" name="title" maxlength="200" required placeholder="Runbook title">
+          </label>
+          <label>
+            Author
+            <input v-model="author" type="text" name="author" maxlength="200" placeholder="Optional">
           </label>
           <label>
             Body

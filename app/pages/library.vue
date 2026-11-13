@@ -2,6 +2,7 @@
 interface LibraryDocument {
   id: string
   title: string
+  author?: string | null
   createdAt: string
   r2Key: string | null
   chunkCount: number
@@ -10,6 +11,7 @@ interface LibraryDocument {
 interface DocumentDetail {
   id: string
   title: string
+  author?: string | null
   body: string
   createdAt: string
   r2Key: string | null
@@ -60,6 +62,7 @@ async function removeDocument (id: string) {
                 <button class="link" type="button" @click="openDocument(document.id)">
                   {{ document.title }}
                 </button>
+                <p v-if="document.author" class="meta">{{ document.author }}</p>
 
               </div>
               <button class="danger" type="button" @click="removeDocument(document.id)">Delete</button>
@@ -69,6 +72,7 @@ async function removeDocument (id: string) {
     </section>
         <article v-if="selected" class="card">
           <h2>{{ selected.title }}</h2>
+          <p v-if="selected.author" class="meta">{{ selected.author }}</p>
           <pre class="body">{{ selected.body }}</pre>
         </article>
   </main>

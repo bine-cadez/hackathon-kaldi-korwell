@@ -1,6 +1,6 @@
 # Document library
 
-Hackathon v1 of an internal document library. Someone pastes or uploads a text or markdown note, or uploads a PDF, Word (`.docx`), or Excel (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`) file. Workers AI converts those files to markdown first. On save the app chunks the text, calls OpenRouter for embeddings, stores the document and chunks in Cloudflare D1, and stores the vectors in Cloudflare Vectorize. Search embeds the query and returns the closest chunks with the source document title. After migration `0002`, search also matches title, author, and body with SQLite FTS5 and can limit results to a created-at date range.
+Hackathon v1 of an internal document library. Someone pastes or uploads a text or markdown note, uploads a CSV, or uploads a PDF, Word (`.docx`), or Excel (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`) file. Workers AI converts those files to markdown first. On save the app chunks the text, calls OpenRouter for embeddings, stores the document and chunks in Cloudflare D1, and stores the vectors in Cloudflare Vectorize. Search embeds the query and returns the closest chunks with the source document title. After migration `0002`, search also matches title, author, and body with SQLite FTS5 and can limit results to a created-at date range.
 
 Chat is not in this version. Nothing is embedded until a person uploads it.
 
@@ -211,7 +211,7 @@ New vectors can take a few seconds to show up in search. Vectorize applies inser
 
 ## What the app does
 
-1. `POST /api/documents` with JSON `{ "title", "body", "author"? }` or multipart fields `title`, optional `author`, and `file` (or `body`). Author is optional. It is stored only when `documents.author` exists. A `file` named `.pdf`, `.docx`, `.xlsx`, `.xlsm`, `.xlsb`, or `.xls` is converted to markdown with Workers AI `toMarkdown` (see [File uploads](#file-uploads)). Any other file is read as UTF-8 text. If `title` is empty, the filename without its extension is used.
+1. `POST /api/documents` with JSON `{ "title", "body", "author"? }` or multipart fields `title`, optional `author`, and `file` (or `body`). Author is optional. It is stored only when `documents.author` exists. A `file` named `.pdf`, `.docx`, `.xlsx`, `.xlsm`, `.xlsb`, or `.xls` is converted to markdown with Workers AI `toMarkdown` (see [File uploads](#file-uploads)). A `.csv` file is read as UTF-8 and rewritten one row per paragraph (see [File uploads](#file-uploads)). Any other file is read as UTF-8 text. If `title` is empty, the filename without its extension is used.
 2. Split the body into chunks of about 1200 characters (max 48 chunks, max ~200k characters).
 3. `POST https://openrouter.ai/api/v1/embeddings` with `openai/text-embedding-3-small` and `dimensions: 1536`.
 4. Insert the document and chunks into D1, including the embedding JSON on `chunks.embedding` (this is what local dev searches). Upsert vectors into Vectorize (id = chunk id, metadata = document id, title, chunk index), except in local dev unless `VECTORIZE_REMOTE=true`. Triggers keep the FTS5 index in sync when it exists.
@@ -224,6 +224,7 @@ New vectors can take a few seconds to show up in search. Vectorize applies inser
 | Upload | What happens |
 | ------ | ------------ |
 | `.md`, `.markdown`, `.txt`, or no extension | Decoded as UTF-8. A file with NUL bytes (a binary format such as `.doc` or `.pptx`) returns **415**. |
+| `.csv` | Decoded as UTF-8 on the Worker, no Workers AI. Comma, semicolon (Excel in Slovenian locale), or tab is detected from the header line. Each row becomes one paragraph, `Header: value; Header: value`, with empty cells dropped. The chunker splits on blank lines, so every chunk holds whole rows that carry their own column names. The usual limits apply (200k characters, 48 chunks of about 1200 characters), which is roughly a few hundred short rows. |
 | `.pdf`, `.docx`, `.xlsx`, `.xlsm`, `.xlsb`, `.xls` | Sent to `env.AI.toMarkdown()` with PDF metadata turned off. Spreadsheets come back as markdown tables. |
 
 Cloudflare does not charge for document conversion; only image conversion is billed, and this app does not accept images. `GET /api/health` reports `bindings.ai`.

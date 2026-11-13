@@ -67,3 +67,28 @@ test('full-text search matches Slovenian diacritics and filters channel, user, a
   if (!byId.configured) return
   assert.deepEqual(byId.matches.map(hit => hit.userId), ['UMAJA'])
 })
+
+test('search ignores Slovenian word endings and falls back to any word', async () => {
+  const { db } = await seed()
+  await ingestSlackCallback({ db, client: fakeSlackClient(), teamId: 'T1', now: '2024-07-01T12:00:00.000Z' }, {
+    type: 'event_callback',
+    team_id: 'T1',
+    event: {
+      type: 'message',
+      channel,
+      user: 'UANA',
+      text: 'Budget za nakup periferne tehnične opreme: 200 EUR na osebo',
+      ts: '1719835200.000100'
+    }
+  })
+  const userIds = async (query: string) => {
+    const found = await searchSlackMessages(db, { query })
+    assert.equal(found.configured, true)
+    return found.configured ? found.matches.map(hit => hit.userId) : []
+  }
+  // "oprema" must find "opreme"; "budget equipment" must not lose it to the missing word.
+  assert.deepEqual(await userIds('oprema'), ['UANA'])
+  assert.deepEqual(await userIds('proračun budget oprema'), ['UANA'])
+  assert.deepEqual(await userIds('budget equipment'), ['UANA'])
+  assert.deepEqual(await userIds('equipment'), [])
+})

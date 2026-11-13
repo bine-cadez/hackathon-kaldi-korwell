@@ -13,6 +13,7 @@ import {
   isSlackUserId,
   parseSlackDateRange,
   slackTsToIso,
+  type SlackDateRange,
   type SlackLink
 } from './slack-text.ts'
 
@@ -110,54 +111,25 @@ export async function searchSlackMessages (
   const range = parseSlackDateRange(input.from, input.to)
   const channelId = channel && isSlackChannelId(channel) ? channel : null
   const userId = user && isSlackUserId(user) ? user : null
-  const match = buildSlackFtsMatch(query, {
+  const matchOptions = {
     userName: user && !userId ? user : undefined,
     channelName: channel && !channelId ? channel : undefined
-  })
+  }
+  const match = buildSlackFtsMatch(query, { ...matchOptions, mode: 'all' })
   const hasDate = range.from != null || range.toExclusive != null
   if (!match && !channelId && !userId && !hasDate) badRequest('Query is required')
 
-  const filters: string[] = []
-  const params: Array<string | number> = []
-  if (match) {
-    filters.push('slack_messages_fts MATCH ?')
-    params.push(match)
-  }
-  if (channelId) {
-    filters.push('m.channel_id = ?')
-    params.push(channelId)
-  }
-  if (userId) {
-    filters.push('m.user_id = ?')
-    params.push(userId)
-  }
-  if (range.from != null) {
-    filters.push('CAST(m.ts AS REAL) >= ?')
-    params.push(range.from)
-  }
-  if (range.toExclusive != null) {
-    filters.push('CAST(m.ts AS REAL) < ?')
-    params.push(range.toExclusive)
-  }
   const limit = clampLimit(input.limit)
-  const where = filters.length ? filters.join(' AND ') : '1 = 1'
-  const sql = match
-    ? `SELECT ${SELECT_LIST}
-       FROM slack_messages AS m
-       JOIN slack_messages_fts ON slack_messages_fts.channel_id = m.channel_id AND slack_messages_fts.ts = m.ts
-       WHERE ${where}
-       ORDER BY bm25(slack_messages_fts), CAST(m.ts AS REAL) DESC
-       LIMIT ?`
-    : `SELECT ${SELECT_LIST}
-       FROM slack_messages AS m
-       WHERE ${where}
-       ORDER BY CAST(m.ts AS REAL) DESC
-       LIMIT ?`
-
+  const run = (fts: string | null) => selectMessages(db, fts, { channelId, userId, range, limit })
   let rows: SearchRow[]
   try {
-    const selected = await db.prepare(sql).bind(...params, limit).all<SearchRow>()
-    rows = selected.results
+    rows = await run(match)
+    // Every word together found nothing. Accept messages with any of the
+    // words, best bm25 first, so one unlucky word does not hide the answer.
+    if (rows.length === 0 && match) {
+      const loose = buildSlackFtsMatch(query, { ...matchOptions, mode: 'any' })
+      if (loose && loose !== match) rows = await run(loose)
+    }
   } catch (error) {
     if (isMissingSchemaError(error)) return { configured: false }
     throw error
@@ -195,6 +167,51 @@ export async function searchSlackMessages (
       }
     })
   }
+}
+
+async function selectMessages (
+  db: DocDatabase,
+  match: string | null,
+  options: { channelId: string | null, userId: string | null, range: SlackDateRange, limit: number }
+): Promise<SearchRow[]> {
+  const { channelId, userId, range, limit } = options
+  const filters: string[] = []
+  const params: Array<string | number> = []
+  if (match) {
+    filters.push('slack_messages_fts MATCH ?')
+    params.push(match)
+  }
+  if (channelId) {
+    filters.push('m.channel_id = ?')
+    params.push(channelId)
+  }
+  if (userId) {
+    filters.push('m.user_id = ?')
+    params.push(userId)
+  }
+  if (range.from != null) {
+    filters.push('CAST(m.ts AS REAL) >= ?')
+    params.push(range.from)
+  }
+  if (range.toExclusive != null) {
+    filters.push('CAST(m.ts AS REAL) < ?')
+    params.push(range.toExclusive)
+  }
+  const where = filters.length ? filters.join(' AND ') : '1 = 1'
+  const sql = match
+    ? `SELECT ${SELECT_LIST}
+       FROM slack_messages AS m
+       JOIN slack_messages_fts ON slack_messages_fts.channel_id = m.channel_id AND slack_messages_fts.ts = m.ts
+       WHERE ${where}
+       ORDER BY bm25(slack_messages_fts), CAST(m.ts AS REAL) DESC
+       LIMIT ?`
+    : `SELECT ${SELECT_LIST}
+       FROM slack_messages AS m
+       WHERE ${where}
+       ORDER BY CAST(m.ts AS REAL) DESC
+       LIMIT ?`
+  const selected = await db.prepare(sql).bind(...params, limit).all<SearchRow>()
+  return selected.results
 }
 
 async function loadParents (db: DocDatabase, rows: SearchRow[]): Promise<Map<string, SlackParentSnippet>> {

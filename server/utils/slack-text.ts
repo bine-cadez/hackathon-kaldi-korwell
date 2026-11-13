@@ -1,4 +1,4 @@
-import { buildFtsMatch } from './fts.ts'
+import { buildStemmedFtsMatch } from './fts.ts'
 import { parseUtcDateRange, utcMidnightSeconds } from './date-range.ts'
 
 const USER_MENTION = /<@([A-Z0-9]+)(?:\|[^>]+)?>/g
@@ -16,9 +16,12 @@ export interface SlackDateRange {
 }
 
 // Quoted tokens only. User text is never concatenated into the MATCH expression raw.
-export function buildSlackFtsMatch (query: string, options?: { userName?: string, channelName?: string }): string | null {
-  return buildFtsMatch([
-    { text: query },
+// Query words ignore word endings. `all` needs every word, `any` needs one.
+export function buildSlackFtsMatch (
+  query: string,
+  options?: { userName?: string, channelName?: string, mode?: 'all' | 'any' }
+): string | null {
+  return buildStemmedFtsMatch(query, options?.mode ?? 'all', [
     ...(options?.userName ? [{ column: 'user_name', text: options.userName }] : []),
     ...(options?.channelName ? [{ column: 'channel_name', text: options.channelName }] : [])
   ])

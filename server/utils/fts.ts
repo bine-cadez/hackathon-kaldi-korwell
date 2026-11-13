@@ -52,6 +52,34 @@ function renderClause (tokens: string[], column?: string): string {
   return `((${all}) OR (${phrase}))`
 }
 
+// Slovenian and English inflect at the end of a word (oprema, opreme, opremo;
+// budget, budgets). Keep the start of a longer token and match it as a prefix.
+export function ftsStem (token: string): string {
+  const chars = [...token.normalize('NFC')]
+  if (chars.length <= 4) return chars.join('')
+  return chars.slice(0, Math.max(4, chars.length - 2)).join('')
+}
+
+// Words of three letters or fewer stay exact, so "za" does not match every "zato".
+function stemmedTerm (token: string): string {
+  return [...token].length <= 3 ? quoteFtsToken(token) : `${quoteFtsToken(ftsStem(token))}*`
+}
+
+/**
+ * Free-text MATCH that ignores word endings. `all` needs every word; `any`
+ * needs one of them and leaves the order to bm25. Column filters stay exact
+ * and always apply.
+ */
+export function buildStemmedFtsMatch (text: string, mode: 'all' | 'any', filters: FtsClause[] = []): string | null {
+  const tokens = ftsTokens(text)
+  const parts = tokens.length === 0
+    ? []
+    : [tokens.length === 1 ? stemmedTerm(tokens[0] ?? '') : `(${tokens.map(stemmedTerm).join(mode === 'all' ? ' AND ' : ' OR ')})`]
+  const rest = buildFtsMatch(filters)
+  if (rest) parts.push(rest)
+  return parts.length ? parts.join(' AND ') : null
+}
+
 export function buildFtsMatch (clauses: FtsClause[]): string | null {
   const parts = clauses.flatMap((clause) => {
     const tokens = ftsTokens(clause.text)

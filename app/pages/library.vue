@@ -89,6 +89,7 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
               {{ document.title }}
             </button>
             <p v-if="document.author" class="meta">{{ document.author }}</p>
+            <DocumentProvenance :created-at="document.createdAt" :uploaded-by="document.uploadedBy" :source="document.source" />
           </div>
           <button class="danger" type="button" @click="removeDocument(document.id)">Delete</button>
         </li>
@@ -118,6 +119,7 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
       <article v-if="selected" ref="detailCard" class="card doc-detail">
         <h2>{{ selected.title }}</h2>
         <p v-if="selected.author" class="meta">{{ selected.author }}</p>
+        <DocumentProvenance :created-at="selected.createdAt" :uploaded-by="selected.uploadedBy" :source="selected.source" />
         <pre class="body">{{ selected.body }}</pre>
       </article>
       <article v-else class="card" aria-busy="true">

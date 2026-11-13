@@ -311,6 +311,7 @@ function openDocument (id: string) {
         <article v-else-if="openedId && selected" class="card">
           <h2>{{ selected.title }}</h2>
           <p v-if="selected.author" class="meta">{{ selected.author }}</p>
+          <DocumentProvenance :created-at="selected.createdAt" :uploaded-by="selected.uploadedBy" :source="selected.source" />
           <pre class="body">{{ selected.body }}</pre>
         </article>
       </template>

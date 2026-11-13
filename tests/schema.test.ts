@@ -34,7 +34,7 @@ test('the used-code migration creates the table the token endpoint writes to', a
   assert.equal(await store.consume('jti-2', exp), true)
 })
 
-function countingDb (migrated: { author: boolean, fts: boolean }) {
+function countingDb (migrated: { author: boolean, fts: boolean, source?: boolean }) {
   const calls = { exec: 0, prepare: 0 }
   const db = {
     exec: async () => { calls.exec++ },
@@ -43,7 +43,9 @@ function countingDb (migrated: { author: boolean, fts: boolean }) {
       return {
         all: async () => {
           if (sql.startsWith('PRAGMA table_info(chunks)')) return { results: [{ name: 'embedding' }] }
-          if (sql.startsWith('PRAGMA table_info(documents)')) return { results: migrated.author ? [{ name: 'author' }] : [] }
+          if (sql.startsWith('PRAGMA table_info(documents)')) {
+            return { results: [...(migrated.author ? [{ name: 'author' }] : []), ...(migrated.source ? [{ name: 'source_key' }] : [])] }
+          }
           return { results: migrated.fts ? [{ name: 'documents_fts' }] : [] }
         }
       }
@@ -75,15 +77,20 @@ test('ensureSchema retries after a failure', async () => {
 
 test('search capabilities are cached only once fully migrated', async () => {
   const { readSearchCapabilities } = await import('../server/utils/capabilities.ts')
-  const { db, calls, migrated } = countingDb({ author: false, fts: false })
+  const { db, calls, migrated } = countingDb({ author: false, fts: false, source: false })
 
-  assert.deepEqual(await readSearchCapabilities(db), { author: false, fts: false })
-  assert.deepEqual(await readSearchCapabilities(db), { author: false, fts: false })
+  assert.deepEqual(await readSearchCapabilities(db), { author: false, fts: false, source: false })
+  assert.deepEqual(await readSearchCapabilities(db), { author: false, fts: false, source: false })
   assert.equal(calls.prepare, 4)
 
+  // 0002 alone is not fully migrated: 0005 can still arrive without a redeploy.
   migrated.author = true
   migrated.fts = true
-  assert.deepEqual(await readSearchCapabilities(db), { author: true, fts: true })
-  assert.deepEqual(await readSearchCapabilities(db), { author: true, fts: true })
+  assert.deepEqual(await readSearchCapabilities(db), { author: true, fts: true, source: false })
   assert.equal(calls.prepare, 6)
+
+  migrated.source = true
+  assert.deepEqual(await readSearchCapabilities(db), { author: true, fts: true, source: true })
+  assert.deepEqual(await readSearchCapabilities(db), { author: true, fts: true, source: true })
+  assert.equal(calls.prepare, 8)
 })

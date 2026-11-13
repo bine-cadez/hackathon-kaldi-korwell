@@ -19,6 +19,8 @@ export interface LibraryDocument {
   body: string
   createdAt?: string | null
   author?: string | null
+  uploadedBy?: string | null
+  source?: { filename: string } | null
 }
 
 export interface SlackSearchInput {
@@ -217,6 +219,8 @@ export function toFetchPayload (origin: string, document: LibraryDocument) {
   const metadata: Record<string, string> = { source: 'korwell-documents' }
   if (document.createdAt) metadata.created_at = document.createdAt
   if (document.author) metadata.author = document.author
+  if (document.uploadedBy) metadata.uploaded_by = document.uploadedBy
+  if (document.source?.filename) metadata.original_filename = document.source.filename
   return {
     id: document.id,
     title: document.title || 'Untitled',

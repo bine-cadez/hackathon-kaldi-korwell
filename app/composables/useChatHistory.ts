@@ -133,3 +133,29 @@ export function useChatHistory () {
 
   return { chats, refresh, save, open, remove, clear }
 }
+
+/** The conversation on the Ask page and the saved chat it belongs to. */
+export function useCurrentChat () {
+  return {
+    turns: useState<ChatTurn[]>('korwell-chat', () => []),
+    // null until the first question.
+    chatId: useState<string | null>('korwell-chat-id', () => null),
+    // Bumped by startNewChat so a mounted Ask page can stop its answer.
+    resets: useState('korwell-chat-resets', () => 0)
+  }
+}
+
+/**
+ * Click handler for links to the home page (logo, Ask): they open a new chat.
+ * The current one is already in the history. Modified clicks open a new tab
+ * and leave it alone.
+ */
+export function useStartNewChat () {
+  const { turns, chatId, resets } = useCurrentChat()
+  return (event?: MouseEvent) => {
+    if (event && (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0)) return
+    turns.value = []
+    chatId.value = null
+    resets.value += 1
+  }
+}

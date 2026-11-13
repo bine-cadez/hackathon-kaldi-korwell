@@ -17,9 +17,7 @@ const suggestions = [
 ]
 
 // useState keeps the conversation while you open a cited document and come back.
-const turns = useState<ChatTurn[]>('korwell-chat', () => [])
-// Which saved chat the conversation belongs to; null until the first question.
-const chatId = useState<string | null>('korwell-chat-id', () => null)
+const { turns, chatId, resets } = useCurrentChat()
 const history = useChatHistory()
 const historyOpen = ref(false)
 const draft = ref('')
@@ -242,6 +240,9 @@ const pairs = computed(() => turns.value.flatMap((turn, index) => {
 // The logo eye in the header blinks faster while Korwell answers.
 const asking = useState('korwell-asking', () => false)
 watch(streaming, (value) => { asking.value = value })
+
+// The logo or the Ask link was clicked while this page is open.
+watch(resets, () => newChat())
 
 // The eye watches the caret while you type a question.
 const askEye = ref<{ lookAt: (x: number, y: number) => void } | null>(null)

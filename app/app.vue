@@ -6,6 +6,7 @@ const links = [
 ]
 // Document pages (/library/<id>) belong to the Library section of the nav.
 const route = useRoute()
+const startNewChat = useStartNewChat()
 const current = (to: string) => to === '/' ? route.path === '/' : route.path === to || route.path.startsWith(`${to}/`)
 
 useHead({
@@ -28,6 +29,7 @@ useHead({
             class="rounded-sm hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary"
             :class="{ 'text-primary': current(link.to) }"
             :aria-current="current(link.to) ? 'page' : undefined"
+            @click="link.to === '/' && startNewChat($event)"
           >
             {{ link.label }}
           </NuxtLink>

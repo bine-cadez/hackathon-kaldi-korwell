@@ -1,5 +1,5 @@
 import type { AccessUser } from '../../utils/cloudflare-access'
-import { extractFileText, fileExtension, FILE_MAX_BYTES, isConvertible, titleFromFilename } from '../../utils/document-file'
+import { titleFromFilename, uploadedFileText } from '../../utils/document-file'
 import { toSourceFile, type SourceFile } from '../../utils/document-storage'
 import { saveDocument } from '../../utils/documents'
 import { readCloudflareEnv, requireEnv, requireOpenRouterApiKey, toHttpError } from '../../utils/env'
@@ -32,19 +32,9 @@ async function readDocumentInput (event: Parameters<typeof readBody>[0]): Promis
     }
     if (file) {
       const named = { ...file, filename: fileName.trim() || file.filename }
-      // .md and .txt are read in the browser (with encoding detection), and the
-      // person may edit that text before saving, so their body wins. Everything
-      // else, and a text file sent without a body, is extracted here.
-      const browserText = body.trim() && !isConvertible(named.filename) && fileExtension(named.filename) !== 'csv'
-      if (browserText) {
-        if (named.data.byteLength > FILE_MAX_BYTES) {
-          const message = `File must be ${FILE_MAX_BYTES / 1024 / 1024} MB or smaller`
-          throw createError({ statusCode: 413, statusMessage: message, data: { message } })
-        }
-      } else {
-        // PDF, Word, and Excel files are converted to markdown by Workers AI.
-        body = await extractFileText(named, readCloudflareEnv(event)?.AI)
-      }
+      // .md and .txt are read in the browser and may be edited before saving, so
+      // that text is kept. The file itself is still validated in every case.
+      body = await uploadedFileText(named, body, readCloudflareEnv(event)?.AI)
       if (!title.trim() && named.filename) title = titleFromFilename(named.filename)
       // Kept in R2 next to the markdown so the original can be downloaded later.
       return { title, body, author, source: toSourceFile(named) }

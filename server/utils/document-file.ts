@@ -100,3 +100,16 @@ async function convertToMarkdown (file: UploadedFile, ai: WorkersAI | undefined)
   }
   return text
 }
+
+// Plain-text files the upload form reads itself (with encoding detection), so
+// the person can edit the text before saving.
+const BROWSER_TEXT_EXTENSIONS = ['md', 'markdown', 'txt']
+
+// The text to save for an uploaded file. The file is always validated here
+// (size, supported type, not binary), even when the form's own text is kept, so
+// a request cannot pair a body with an arbitrary file and have it stored.
+export async function uploadedFileText (file: UploadedFile, browserBody: string, ai: WorkersAI | undefined): Promise<string> {
+  const extracted = await extractFileText(file, ai)
+  const keepBrowserText = browserBody.trim() !== '' && BROWSER_TEXT_EXTENSIONS.includes(fileExtension(file.filename))
+  return keepBrowserText ? browserBody : extracted
+}

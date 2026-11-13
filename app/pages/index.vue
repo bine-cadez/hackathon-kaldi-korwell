@@ -58,6 +58,7 @@ const sampleNotes = [
   ['Retrospective', 'The team wants to keep the weekly demos and document decisions earlier. Follow-up actions will be reviewed at the next planning session.']
 ]
 
+const corpus = ref<'documents' | 'slack'>('documents')
 const query = ref('')
 const archiveEye = ref<{ lookAt: (x: number, y: number) => void } | null>(null)
 const queryInput = ref<HTMLInputElement | null>(null)
@@ -159,10 +160,15 @@ async function openDocument (id: string) {
 <template>
   <main class="search-page">
     <section class="search-hero" aria-labelledby="korwell-title">
-      <ArchiveEye ref="archiveEye" :searching="searching" :no-results="searched && !searching && !searchError && !matches.length" />
+      <ArchiveEye ref="archiveEye" :searching="searching" :no-results="corpus === 'documents' && searched && !searching && !searchError && !matches.length" />
       <p class="eyebrow archive-quote"><q v-if="archiveQuote">{{ archiveQuote }}</q></p>
       <h1 id="korwell-title">Korwell</h1>
-      <form class="search-bar" role="search" novalidate @submit.prevent="runSearch">
+      <div class="corpus-tabs" role="tablist" aria-label="What to search">
+        <button type="button" role="tab" :aria-selected="corpus === 'documents'" @click="corpus = 'documents'">Documents</button>
+        <button type="button" role="tab" :aria-selected="corpus === 'slack'" @click="corpus = 'slack'">Slack</button>
+      </div>
+      <SlackSearch v-if="corpus === 'slack'" />
+      <form v-else class="search-bar" role="search" novalidate @submit.prevent="runSearch">
         <label class="sr-only" for="archive-query">Search the records</label>
         <input id="archive-query" ref="queryInput" v-model="query" :aria-invalid="queryInvalid || undefined" :aria-describedby="queryInvalid ? 'archive-query-error' : undefined" @input="queryInvalid = false; followCaret()" @focus="followCaret" @click="followCaret" @keyup="followCaret" type="text" inputmode="search" enterkeyhint="search" name="query" required placeholder="Search the records…">
         <button v-if="query" class="clear-search" type="button" aria-label="Clear search" title="Clear search" @click="clearQuery">
@@ -177,11 +183,11 @@ async function openDocument (id: string) {
           </svg>
         </button>
       </form>
-      <p v-if="queryInvalid" id="archive-query-error" class="query-feedback" role="alert">Enter a search term to look through the archive.</p>
+      <p v-if="corpus === 'documents' && queryInvalid" id="archive-query-error" class="query-feedback" role="alert">Enter a search term to look through the archive.</p>
       <p v-if="preview" class="meta">Design preview · sample documents</p>
     </section>
 
-    <section v-if="searched" class="search-results" aria-label="Search results" :aria-busy="searching">
+    <section v-if="corpus === 'documents' && searched" class="search-results" aria-label="Search results" :aria-busy="searching">
       <p v-if="searching" role="status">Searching the archive…</p>
       <p v-else-if="searchError" class="err" role="alert">{{ searchError }}</p>
       <p v-else-if="!matches.length" role="status">No matching passages found. Try a different search.</p>

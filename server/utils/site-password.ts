@@ -42,7 +42,12 @@ export function isPublicRoute (method: string, pathname: string): boolean {
   if ((verb === 'GET' || verb === 'HEAD') && (path === '/api/health' || path === '/favicon.ico' || path === '/korwell-eye.svg' || path === '/robots.txt')) {
     return true
   }
+  if (verb === 'POST' && path === '/api/slack/events') return true
   return verb === 'POST' && path === '/api/auth/login'
+}
+
+export function isSlackEventsRoute (method: string, pathname: string): boolean {
+  return method.toUpperCase() === 'POST' && normalizePathname(pathname) === '/api/slack/events'
 }
 
 export function passwordFromAuthorization (authorization: string | null | undefined): string {

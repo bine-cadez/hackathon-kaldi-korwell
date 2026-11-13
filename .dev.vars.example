@@ -8,3 +8,8 @@ SITE_PASSWORD=
 # Optional Cloudflare Access assertion validation. Set both together.
 ACCESS_TEAM_DOMAIN=
 ACCESS_AUD=
+
+# Slack archive. Empty = events route returns not configured. See README.
+SLACK_SIGNING_SECRET=
+SLACK_BOT_TOKEN=
+SLACK_CHANNEL_IDS=

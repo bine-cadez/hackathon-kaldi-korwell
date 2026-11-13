@@ -10,6 +10,10 @@
   // in-app gate later. Wrangler has no portable Access block (it needs your
   // Zero Trust account). After deploy, open Workers & Pages → doc-library →
   // Access, protect this Worker, and choose all traffic.
+  // Slack cannot send an Access JWT. Add one Access Bypass policy for
+  // POST /api/slack/events only. The route checks X-Slack-Signature.
+  // Do not bypass /api/slack/search or /api/slack/backfill.
+  // Secrets (not vars): SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN, SLACK_CHANNEL_IDS.
   // https://developers.cloudflare.com/workers/configuration/cloudflare-access/
   "compatibility_date": "2026-11-05",
   "compatibility_flags": ["nodejs_compat"],

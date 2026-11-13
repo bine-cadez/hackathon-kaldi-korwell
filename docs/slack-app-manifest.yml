@@ -1,0 +1,36 @@
+# Slack app manifest for the Korwell channel archive.
+# Create the app at https://api.slack.com/apps → Create New App → From a manifest.
+# After install, copy the Bot User OAuth Token and the Signing Secret into Worker
+# secrets. Then invite the bot to each allow-listed channel.
+# https://api.slack.com/reference/manifests
+display_information:
+  name: Korwell Archive
+  description: Saves allow-listed Slack channels into the Korwell document library.
+  background_color: "#0d5c5c"
+features:
+  bot_user:
+    display_name: Korwell Archive
+    always_online: false
+oauth_config:
+  scopes:
+    bot:
+      - channels:history
+      - groups:history
+      - channels:read
+      - groups:read
+      - users:read
+      - reactions:read
+      - files:read
+settings:
+  event_subscriptions:
+    request_url: https://doc-library.binec.workers.dev/api/slack/events
+    bot_events:
+      - message.channels
+      - message.groups
+      - reaction_added
+      - reaction_removed
+      - channel_rename
+      - group_rename
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false

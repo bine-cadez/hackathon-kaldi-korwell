@@ -4,6 +4,7 @@ import type { SearchCapabilities } from './capabilities'
 import { embedTexts } from './embeddings'
 import type { DocLibraryEnv } from './env'
 import { buildFtsMatch, ftsTokens, fuseRankedHits, textHasTokens } from './fts'
+import { parseUtcDateRange } from './date-range'
 import { ensureSchema } from './schema'
 import { rankByCosine, useLocalVectors } from './vectors'
 
@@ -52,43 +53,13 @@ interface StoredChunkRow {
   embedding?: string | null
 }
 
-const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
-
 function badRequest (message: string): never {
   throw createError({ statusCode: 400, statusMessage: message, data: { message } })
 }
 
-function blank (value: string | null | undefined): string | null {
-  const trimmed = value?.trim() ?? ''
-  return trimmed ? trimmed : null
-}
-
-function isCalendarDate (value: string): boolean {
-  const match = ISO_DATE.exec(value)
-  if (!match) return false
-  const year = Number(match[1])
-  const month = Number(match[2])
-  const day = Number(match[3])
-  const utc = new Date(Date.UTC(year, month - 1, day))
-  return utc.getUTCFullYear() === year && utc.getUTCMonth() === month - 1 && utc.getUTCDate() === day
-}
-
-function nextUtcDate (value: string): string {
-  const match = ISO_DATE.exec(value)
-  if (!match) return value
-  const utc = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
-  utc.setUTCDate(utc.getUTCDate() + 1)
-  return utc.toISOString().slice(0, 10)
-}
-
 // Inclusive calendar dates compared to the UTC timestamp in documents.created_at.
 export function parseCreatedAtRange (from?: string | null, to?: string | null): CreatedAtRange {
-  const start = blank(from)
-  const end = blank(to)
-  if (start && !isCalendarDate(start)) badRequest('from must be a calendar date (YYYY-MM-DD)')
-  if (end && !isCalendarDate(end)) badRequest('to must be a calendar date (YYYY-MM-DD)')
-  if (start && end && start > end) badRequest('from must be on or before to')
-  return { from: start, toExclusive: end ? nextUtcDate(end) : null }
+  return parseUtcDateRange(from, to)
 }
 
 function createdAtSql (range: CreatedAtRange, column: string): { sql: string, params: string[] } {

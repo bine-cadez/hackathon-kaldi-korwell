@@ -46,6 +46,9 @@ describe('site password decision', { concurrency: false }, () => {
       ['GET', '/api/documents/doc_1'],
       ['DELETE', '/api/documents/doc_1'],
       ['POST', '/api/health'],
+      ['POST', '/api/slack/search'],
+      ['POST', '/api/slack/backfill'],
+      ['GET', '/api/slack/events'],
       ['GET', '/']
     ] as const
     for (const [method, pathname] of locked) {
@@ -174,7 +177,9 @@ describe('site password HTTP gate', { concurrency: false }, () => {
       ['POST', '/api/search'],
       ['GET', '/api/documents'],
       ['GET', '/api/documents/doc_1'],
-      ['DELETE', '/api/documents/doc_1']
+      ['DELETE', '/api/documents/doc_1'],
+      ['POST', '/api/slack/search'],
+      ['POST', '/api/slack/backfill']
     ] as const) {
       const response = await handler(new Request(`http://library.test${path}`, {
         method,
@@ -262,6 +267,24 @@ describe('site password HTTP gate', { concurrency: false }, () => {
     }))
     assert.equal(secure.status, 200)
     assert.match(secure.headers.get('set-cookie') || '', /Secure/i)
+  })
+
+  test('Slack events skip the password and search stays locked', async () => {
+    process.env.SITE_PASSWORD = 's3cret'
+    const events = await handler(new Request('http://library.test/api/slack/events', {
+      method: 'POST',
+      headers: { origin: 'https://hooks.slack.com', 'content-type': 'application/json' },
+      body: '{}'
+    }))
+    assert.equal(events.status, 200)
+    assert.equal((await events.json() as { reached?: boolean }).reached, true)
+
+    const search = await handler(new Request('http://library.test/api/slack/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: 'čokolada' })
+    }))
+    assert.equal(search.status, 401)
   })
 
   test('unset SITE_PASSWORD does not block API routes', async () => {

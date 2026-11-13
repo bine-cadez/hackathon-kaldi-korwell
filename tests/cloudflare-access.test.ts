@@ -81,4 +81,13 @@ test('signed Access assertions gate the pages and API and supply the verified us
   assert.equal((await request('/api/search', { ...headers, origin }, 'POST')).status, 200)
   assert.equal((await request('/api/search', { ...headers, origin: 'https://other.example' }, 'POST')).status, 403)
   assert.equal((await request('/api/auth/login', headers, 'POST')).status, 404)
+  assert.equal((await request('/api/slack/events')).status, 401)
+  assert.equal((await request('/api/slack/events', {
+    origin: 'https://hooks.slack.com',
+    'content-type': 'application/json'
+  }, 'POST')).status, 200)
+  assert.equal((await request('/api/slack/search', undefined, 'POST')).status, 401)
+  assert.equal((await request('/api/slack/backfill', { ...headers, origin: 'https://other.example' }, 'POST')).status, 403)
+  assert.equal((await request('/api/slack/backfill', { ...headers, origin }, 'POST')).status, 200)
+  assert.equal((await request('/api/slack/events/extra', undefined, 'POST')).status, 401)
 })

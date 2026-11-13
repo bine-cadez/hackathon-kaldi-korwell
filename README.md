@@ -58,6 +58,9 @@ npm test
 | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `OPENROUTER_API_KEY` | `.env` for `npm run dev`. `.dev.vars` for `wrangler dev`. Production: `npx wrangler secret put OPENROUTER_API_KEY` |
 | `SITE_PASSWORD`      | Optional. Empty = unlocked. Same files for local. Production: `npx wrangler secret put SITE_PASSWORD`             |
+| `SLACK_SIGNING_SECRET` | Slack app signing secret. Unset = `POST /api/slack/events` returns not configured. Production: `npx wrangler secret put SLACK_SIGNING_SECRET` |
+| `SLACK_BOT_TOKEN`    | Bot token (`xoxb-…`) for `users.info`, history, and permalinks. Unset = messages still store, names stay blank. Production: `npx wrangler secret put SLACK_BOT_TOKEN` |
+| `SLACK_CHANNEL_IDS`  | Comma-separated allow list (`C…`, `G…`). Empty = archive nothing. Production: `npx wrangler secret put SLACK_CHANNEL_IDS` |
 
 Do not commit the key. Do not put it in `wrangler.jsonc`. Placeholders only live in `.env.example` and `.dev.vars.example`.
 
@@ -240,6 +243,36 @@ npx wrangler d1 execute DB --local --command "SELECT document_id, author FROM do
 
 Other routes: `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/documents/:id`, `GET /api/health`. With `SITE_PASSWORD` set, direct calls to the document and search routes return 401 before any embedding request. Health stays public. `POST /api/auth/login` checks the password and sets the cookie.
 
+## Slack archive
+
+Allow-listed Slack channels are copied into D1 and searched with FTS5 only. There are no embeddings and no Vectorize index for messages.
+
+`migrations/0003_slack_archive.sql` adds `slack_messages`, channel and user caches, `slack_reactions`, and `slack_messages_fts`. The tokenizer is `unicode61 remove_diacritics 2`, so `č`/`š`/`ž` match `c`/`s`/`z`. Triggers keep the index in sync. A deleted message stays in the table and in search: `deleted` is set, `deleted_at` is recorded, and the text, raw event, and edit history stay. Results are flagged deleted. The Worker does **not** create these tables on demand. PR previews share production D1 and do not run migrations, so search returns a clear "not configured" response until `0003` has been applied. Missing `SLACK_*` secrets do not crash the Worker.
+
+`POST /api/slack/events` is the Slack Events API request URL. It checks `X-Slack-Signature` (v0 HMAC-SHA256 over `v0:timestamp:raw body`, five-minute window, constant-time compare), answers `url_verification`, and acknowledges other events before finishing the write with `waitUntil`. The path is the only route exempt from Cloudflare Access and the site password. Signature verification is the lock. `POST /api/slack/search` and `POST /api/slack/backfill` stay behind Access or the password.
+
+Cloudflare Access runs before the Worker. Add a Bypass policy for **only** `https://doc-library.binec.workers.dev/api/slack/events` (the app path `/api/slack/events`). Do not bypass the rest of the hostname.
+
+Manifest: [`docs/slack-app-manifest.yml`](docs/slack-app-manifest.yml). Bot scopes: `channels:history`, `groups:history`, `channels:read`, `groups:read`, `users:read`, `reactions:read`, `files:read`. Events: `message.channels`, `message.groups`, `reaction_added`, `reaction_removed`, `channel_rename`, `group_rename`. Request URL: `https://doc-library.binec.workers.dev/api/slack/events`.
+
+Setup, in order, after this branch is on `main` and the deploy workflow has applied `0003`:
+
+1. `npx wrangler secret put SLACK_SIGNING_SECRET`
+2. `npx wrangler secret put SLACK_BOT_TOKEN`
+3. `npx wrangler secret put SLACK_CHANNEL_IDS` (comma-separated ids)
+4. Access Bypass for `/api/slack/events` only.
+5. Paste the request URL into the Slack app and install it.
+6. Invite the bot to each allow-listed channel.
+7. Sign in to Korwell and `POST /api/slack/backfill` (optional JSON `{ "channelIds": ["C…"], "resume": { "channelId", "historyCursor", "pageOffset", "threadTs", "repliesCursor" } }`). Slack Free history is about 90 days. Each call stays under D1's free-plan query cap (a batch of writes counts as one query) and returns `partial: true` with a resume cursor when the budget, the time limit, or a `Retry-After` that would overrun the deadline is reached. Call again with that `resume` until `partial` is false. A channel Slack refuses is reported on its own and the next channel still runs. A rejected event signature is a generic 401; the reason is only in the Worker logs.
+
+The search page has a Slack tab: full text, plus channel, person, and a UTC date range on the message timestamp. Results show the author, channel, time, thread snippet, and permalink.
+
+Local check after `npm run db:migrate:local`:
+
+```bash
+npx wrangler d1 execute DB --local --command "SELECT name FROM sqlite_master WHERE name = 'slack_messages_fts';"
+```
+
 ## Layout
 
 ```
@@ -250,10 +283,12 @@ public/robots.txt       disallow every crawler
 public/_headers         X-Robots-Tag on static assets
 migrations/0001_init.sql
 migrations/0002_document_search.sql   author column and FTS5
-server/api/             upload, list, search
-server/middleware/      X-Robots-Tag and the shared-password gate
-server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes, FTS helpers
-app/pages/index.vue     search UI, including date, title, and author filters
+migrations/0003_slack_archive.sql
+docs/slack-app-manifest.yml
+server/api/             upload, list, search, Slack events
+server/middleware/      X-Robots-Tag and the shared-password / Access gate
+server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes, FTS helpers, Slack archive
+app/pages/index.vue     document search (date, title, author filters) and the Slack search tab
 app/pages/feed.vue      paste/upload, including optional author
 ```
 

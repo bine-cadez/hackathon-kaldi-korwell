@@ -4,11 +4,13 @@ import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { EMBEDDING_DIMENSIONS } from '../server/utils/embeddings.ts'
 import type { DocDatabase, DocLibraryEnv, VectorizeMatch } from '../server/utils/env.ts'
-import { getDocument, listDocuments, saveDocument } from '../server/utils/documents.ts'
+import { getDocument, saveDocument } from '../server/utils/documents.ts'
+import { listDocuments } from '../server/utils/document-list.ts'
 import { parseCreatedAtRange, searchDocuments, searchStoredEmbeddings } from '../server/utils/search.ts'
 
 const initSql = readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8')
 const searchSql = readFileSync(new URL('../migrations/0002_document_search.sql', import.meta.url), 'utf8')
+const uploadsSql = readFileSync(new URL('../migrations/0005_document_uploads.sql', import.meta.url), 'utf8')
 
 function wrap (sqlite: DatabaseSync): DocDatabase {
   return {
@@ -46,10 +48,11 @@ function wrap (sqlite: DatabaseSync): DocDatabase {
   }
 }
 
-function openDb (migration: '0001' | '0002') {
+function openDb (migration: '0001' | '0002' | '0005') {
   const sqlite = new DatabaseSync(':memory:')
   sqlite.exec(initSql)
-  if (migration === '0002') sqlite.exec(searchSql)
+  if (migration !== '0001') sqlite.exec(searchSql)
+  if (migration === '0005') sqlite.exec(uploadsSql)
   return sqlite
 }
 
@@ -260,7 +263,7 @@ test('stored embeddings honour the date range and author before cosine ranking',
   insert.run('doc-other', 'Čokolada', 'Drugi avtor.', 'Ana Kovač', '2024-05-01T08:00:00.000Z')
   chunk.run('chunk-other', 'doc-other', 'Drugi avtor.', JSON.stringify([1, 0, 0]), '2024-05-01T08:00:00.000Z')
 
-  const caps = { author: true, fts: true }
+  const caps = { author: true, fts: true, uploads: false }
   const may = await searchStoredEmbeddings(
     envFor(sqlite),
     [1, 0, 0],
@@ -311,7 +314,7 @@ test('saving a document writes author only after the column exists', async () =>
     assert.equal(unsavedAuthor.author, null)
     assert.equal(oldQueries.some(query => query.includes('INSERT INTO documents') && query.includes('author')), false)
     const listed = await listDocuments(oldEnv)
-    assert.equal(listed[0]?.author, null)
+    assert.equal(listed.documents[0]?.author, null)
 
     const nextDb = openDb('0002')
     const saved = await saveDocument(envFor(nextDb), 'test-key', {
@@ -328,6 +331,58 @@ test('saving a document writes author only after the column exists', async () =>
       () => saveDocument(envFor(nextDb), 'test-key', { title: 'T', author: 'a'.repeat(201), body: 'Body' }),
       (error: unknown) => (error as { statusCode?: number }).statusCode === 400
     )
+  } finally {
+    restore()
+  }
+})
+
+test('saving stores the uploader, the original file, and composed Unicode', async () => {
+  const restore = installEmbeddings()
+  try {
+    const sqlite = openDb('0005')
+    const saved = await saveDocument(envFor(sqlite), 'test-key', {
+      // Decomposed č and š, as macOS can send them.
+      title: '  Poroc\u030Cilo   Q2 ',
+      author: 'Ana Kovac\u030C',
+      body: 'S\u030Cola.\r\nVrstica.',
+      file: { name: 'C:\\fakepath\\Poroc\u030Cilo Q2.docx', size: 2048, type: 'Application/VND.openxmlformats-officedocument.wordprocessingml.document' },
+      uploader: { id: 'sub-123', email: 'ana.kovac@kaldi.si' }
+    })
+    assert.equal(saved.uploadedBy, 'ana.kovac@kaldi.si')
+    assert.equal(saved.fileName, 'Poročilo Q2.docx')
+
+    const row = sqlite.prepare('SELECT * FROM documents WHERE id = ?').get(saved.id) as Record<string, unknown>
+    assert.equal(row.title, 'Poročilo Q2')
+    assert.equal(row.author, 'Ana Kovač')
+    assert.equal(row.body, 'Šola.\nVrstica.')
+    assert.equal(row.title_sort, 'poroc{ilo q2')
+    assert.equal(row.file_name, 'Poročilo Q2.docx')
+    assert.equal(row.file_size, 2048)
+    assert.equal(row.file_type, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+    assert.equal(row.uploaded_by, 'ana.kovac@kaldi.si')
+    assert.equal(row.uploaded_by_id, 'sub-123')
+    assert.equal(sqlite.prepare('SELECT count(*) AS n FROM documents_fts WHERE documents_fts MATCH ?').get('file_name : porocilo')?.n, 1)
+
+    const document = await getDocument(envFor(sqlite), saved.id)
+    assert.equal(document.fileName, 'Poročilo Q2.docx')
+    assert.equal(document.fileSize, 2048)
+    assert.equal(document.uploadedBy, 'ana.kovac@kaldi.si')
+
+    // Pasted text in shared-password mode: no file, no uploader.
+    const pasted = await saveDocument(envFor(sqlite), 'test-key', { title: 'Zapisnik', body: 'Besedilo.' })
+    const pastedRow = sqlite.prepare('SELECT file_name, uploaded_by FROM documents WHERE id = ?').get(pasted.id) as Record<string, unknown>
+    assert.equal(pastedRow.file_name, null)
+    assert.equal(pastedRow.uploaded_by, null)
+
+    // Before 0005 the same save still works and skips the new columns.
+    const older = await saveDocument(envFor(openDb('0002')), 'test-key', {
+      title: 'Star',
+      body: 'Besedilo.',
+      file: { name: 'star.txt' },
+      uploader: { id: 'sub', email: 'x@kaldi.si' }
+    })
+    assert.equal(older.fileName, null)
+    assert.equal(older.uploadedBy, null)
   } finally {
     restore()
   }

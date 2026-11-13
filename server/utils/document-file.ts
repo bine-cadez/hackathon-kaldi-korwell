@@ -1,8 +1,10 @@
 import { createError } from 'h3'
 import { csvToText } from './csv.ts'
+import { decodeTextBytes } from '../../shared/utils/text.ts'
 import type { ConversionResult, WorkersAI } from './env.ts'
 
-// Plain-text uploads are decoded as UTF-8. Everything in CONVERTIBLE_TYPES goes
+// Plain-text uploads are decoded as UTF-8, or Windows-1250 / ISO-8859-2 when the
+// bytes are not valid UTF-8 (shared/utils/text.ts). Everything in CONVERTIBLE_TYPES goes
 // through Workers AI toMarkdown first, so the rest of the pipeline only sees text.
 // CSV is decoded as text and then rewritten one row per paragraph (see csv.ts).
 export const TEXT_EXTENSIONS = ['md', 'markdown', 'txt', 'csv'] as const
@@ -53,7 +55,7 @@ export async function extractFileText (file: UploadedFile, ai: WorkersAI | undef
 }
 
 function decodeText (file: UploadedFile): string {
-  const text = new TextDecoder('utf-8').decode(file.data)
+  const { text } = decodeTextBytes(file.data)
   // A NUL byte means a binary format we do not convert (.doc, .pptx, images…).
   if (text.includes('\u0000')) {
     const supported = [...TEXT_EXTENSIONS, ...Object.keys(CONVERTIBLE_TYPES)].map(ext => `.${ext}`).join(', ')

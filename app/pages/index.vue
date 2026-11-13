@@ -1,17 +1,6 @@
 <script setup lang="ts">
 import { useQuery } from '@pinia/colada'
-import { documentByIdQuery } from '~/queries/documents'
-
-interface SearchMatch {
-  chunkId: string
-  documentId: string
-  title: string
-  author?: string | null
-  createdAt?: string | null
-  chunkIndex: number
-  content: string
-  score: number
-}
+import { SEARCH_QUERY_KEYS, documentPath, documentSearchQuery, type SearchMatch, type SearchParams } from '~/queries/documents'
 
 // Excerpts checked against the text of Nineteen Eighty-Four, Parts I and II.
 const archiveQuotes = [
@@ -54,29 +43,76 @@ const sampleNotes = [
   ['Retrospective', 'The team wants to keep the weekly demos and document decisions earlier. Follow-up actions will be reviewed at the next planning session.']
 ]
 
+const router = useRouter()
+const request = useRequestFetch()
+
+// The search lives in the URL (/?q=…&from=…&author=…), so results can be shared
+// and reloaded, and Back from a document page returns to them (cached).
+function queryText (value: unknown): string {
+  const raw = Array.isArray(value) ? value[0] : value
+  return typeof raw === 'string' ? raw.normalize('NFC').trim().replace(/\s+/g, ' ').slice(0, 2000) : ''
+}
+function queryDate (value: unknown): string {
+  const raw = queryText(value)
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : ''
+}
+const searchParams = computed((): SearchParams => ({
+  q: queryText(route.query.q),
+  from: queryDate(route.query.from),
+  to: queryDate(route.query.to),
+  title: queryText(route.query.title).slice(0, 200),
+  author: queryText(route.query.author).slice(0, 200)
+}))
+const searched = computed(() => Boolean(searchParams.value.q || searchParams.value.title || searchParams.value.author))
+
 const corpus = ref<'documents' | 'slack'>('documents')
-const query = ref('')
-const fromDate = ref('')
-const toDate = ref('')
-const titleFilter = ref('')
-const authorFilter = ref('')
+// Form fields: edited freely, applied to the URL on submit.
+const query = ref(searchParams.value.q)
+const fromDate = ref(searchParams.value.from)
+const toDate = ref(searchParams.value.to)
+const titleFilter = ref(searchParams.value.title)
+const authorFilter = ref(searchParams.value.author)
+// Back/forward to another search: show its terms in the form.
+watch(searchParams, (params) => {
+  query.value = params.q
+  fromDate.value = params.from
+  toDate.value = params.to
+  titleFilter.value = params.title
+  authorFilter.value = params.author
+})
 const archiveEye = ref<{ lookAt: (x: number, y: number) => void } | null>(null)
 const queryInput = ref<HTMLInputElement | null>(null)
 const queryInvalid = ref(false)
-const searching = ref(false)
-const searched = ref(false)
-// Raw error so ErrorState can tell a network failure from a server one.
-const searchError = ref<unknown>(null)
-const matches = ref<SearchMatch[]>([])
 
-// Shares the document cache with the Library, so a document opened in either is instant in the other.
-const openedId = ref<string | null>(null)
-const request = useRequestFetch()
-const { data: selected, error: detailError, isPending: detailPending, asyncStatus: detailAsyncStatus, refetch: retryDetail } = useQuery(() => ({
-  ...documentByIdQuery({ id: openedId.value ?? '', request }),
-  enabled: !!openedId.value
-}))
-const openedMatch = computed(() => matches.value.find(match => match.documentId === openedId.value))
+function previewMatches (): SearchMatch[] {
+  if (route.query.preview === 'empty') return []
+  return sampleProjects.flatMap(project => sampleNotes.map(([title, content]) => ({
+    chunkId: `preview-${project}-${title}`,
+    documentId: '',
+    title: `${project} · ${title}`,
+    chunkIndex: 0,
+    content: content!,
+    score: 0
+  })))
+}
+
+const {
+  data: searchResult,
+  error: searchError,
+  asyncStatus: searchStatus,
+  refetch: refetchSearch
+} = useQuery(() => preview.value
+  ? {
+      key: [...SEARCH_QUERY_KEYS.root, 'preview', { ...searchParams.value, preview: String(route.query.preview) }],
+      query: async () => {
+        await new Promise(resolve => setTimeout(resolve, 3000))
+        return { matches: previewMatches() }
+      },
+      enabled: searched.value
+    }
+  : { ...documentSearchQuery({ params: searchParams.value, request }), enabled: searched.value })
+const searching = computed(() => searched.value && searchStatus.value === 'loading')
+const matches = computed(() => searchResult.value?.matches ?? [])
 
 let caretFrame = 0
 let caretMeasure: CanvasRenderingContext2D | null = null
@@ -121,7 +157,7 @@ function clearFilters () {
   authorFilter.value = ''
 }
 
-async function runSearch () {
+function runSearch () {
   if (searching.value) return
   if (!query.value.trim() && !titleFilter.value.trim() && !authorFilter.value.trim()) {
     queryInvalid.value = true
@@ -129,45 +165,18 @@ async function runSearch () {
     return
   }
   queryInvalid.value = false
-  searching.value = true
-  searched.value = true
-  openedId.value = null
-  searchError.value = null
-  try {
-    if (preview.value) {
-      await new Promise(resolve => setTimeout(resolve, 3000))
-      matches.value = route.query.preview === 'empty' ? [] : sampleProjects.flatMap(project => sampleNotes.map(([title, content]) => ({
-        chunkId: `preview-${project}-${title}`,
-        documentId: '',
-        title: `${project} · ${title}`,
-        chunkIndex: 0,
-        content,
-        score: 0
-      })))
-      return
-    }
-    const result = await $fetch<{ matches: SearchMatch[] }>('/api/search', {
-      method: 'POST',
-      body: {
-        query: query.value,
-        topK: 5,
-        from: fromDate.value || undefined,
-        to: toDate.value || undefined,
-        title: titleFilter.value || undefined,
-        author: authorFilter.value || undefined
-      }
-    })
-    matches.value = result.matches
-  } catch (error) {
-    matches.value = []
-    searchError.value = error
-  } finally {
-    searching.value = false
-  }
-}
-
-function openDocument (id: string) {
-  openedId.value = id
+  const next: Record<string, string> = {}
+  if (query.value.trim()) next.q = query.value.trim()
+  if (fromDate.value) next.from = fromDate.value
+  if (toDate.value) next.to = toDate.value
+  if (titleFilter.value.trim()) next.title = titleFilter.value.trim()
+  if (authorFilter.value.trim()) next.author = authorFilter.value.trim()
+  if (typeof route.query.preview === 'string') next.preview = route.query.preview
+  const same = Object.keys(next).length === Object.keys(route.query).length
+    && Object.entries(next).every(([key, value]) => route.query[key] === value)
+  // The same search again means "search again"; a new one gets its own history entry.
+  if (same) refetchSearch()
+  else router.push({ query: next })
 }
 </script>
 
@@ -228,41 +237,25 @@ function openDocument (id: string) {
         <p role="status" class="sr-only">Searching the archive…</p>
         <ResultSkeleton />
       </template>
-      <ErrorState v-else-if="searchError" :error="searchError" title="Search didn’t finish" @retry="runSearch()" />
+      <ErrorState v-else-if="searchError" :error="searchError" title="Search didn’t finish" @retry="refetchSearch()" />
       <p v-else-if="!matches.length" role="status">No matching passages found. Try a different search.</p>
       <template v-else>
         <h2>{{ preview ? `${matches.length} sample results` : 'From the archive' }}</h2>
         <ol class="results">
           <li v-for="match in matches" :key="match.chunkId" class="result">
-            <h3>{{ match.title || 'Untitled' }}</h3>
+            <h3>
+              <NuxtLink v-if="match.documentId" :to="documentPath(match.documentId)">{{ match.title || 'Untitled' }}</NuxtLink>
+              <template v-else>{{ match.title || 'Untitled' }}</template>
+            </h3>
             <p v-if="match.author || match.createdAt" class="meta">
               <span v-if="match.author">{{ match.author }}</span><span v-if="match.author && match.createdAt"> · </span><span v-if="match.createdAt">{{ match.createdAt.slice(0, 10) }}</span>
             </p>
             <p class="chunk">{{ match.content || 'Passage unavailable.' }}</p>
-            <button v-if="match.documentId" class="ghost" type="button" @click="openDocument(match.documentId)">Open document</button>
+            <p v-if="match.documentId" class="result-actions">
+              <NuxtLink class="button-link" :to="documentPath(match.documentId)" :aria-label="`Open ${match.title || 'document'}`">Open document</NuxtLink>
+            </p>
           </li>
         </ol>
-        <article v-if="openedId && detailError" class="card">
-          <h2>{{ openedMatch?.title || 'Document' }}</h2>
-          <ErrorState
-            :error="detailError"
-            title="Couldn’t open this document"
-            :retrying="detailAsyncStatus === 'loading'"
-            @retry="retryDetail()"
-            @dismiss="openedId = null"
-          />
-        </article>
-        <article v-else-if="openedId && detailPending" class="card" aria-busy="true">
-          <h2>{{ openedMatch?.title || 'Opening document' }}</h2>
-          <p v-if="openedMatch?.author" class="meta">{{ openedMatch.author }}</p>
-          <p role="status" class="sr-only">Opening {{ openedMatch?.title || 'document' }}…</p>
-          <DocBodySkeleton />
-        </article>
-        <article v-else-if="openedId && selected" class="card">
-          <h2>{{ selected.title }}</h2>
-          <p v-if="selected.author" class="meta">{{ selected.author }}</p>
-          <pre class="body">{{ selected.body }}</pre>
-        </article>
       </template>
     </section>
   </main>

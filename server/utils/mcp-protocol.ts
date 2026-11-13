@@ -19,6 +19,8 @@ export interface LibraryDocument {
   body: string
   createdAt?: string | null
   author?: string | null
+  fileName?: string | null
+  uploadedBy?: string | null
 }
 
 export interface SlackSearchInput {
@@ -194,7 +196,9 @@ export async function listTools (library: LibraryApi, env: unknown) {
 }
 
 export function documentUrl (origin: string, id: string): string {
-  return `${origin.replace(/\/$/, '')}/library?document=${encodeURIComponent(id)}`
+  // The document's own page. Older citations used /library?document=<id>; the
+  // Library page still redirects those here.
+  return `${origin.replace(/\/$/, '')}/library/${encodeURIComponent(id)}`
 }
 
 export function toSearchResults (origin: string, matches: LibraryMatch[], limit: number) {
@@ -217,6 +221,8 @@ export function toFetchPayload (origin: string, document: LibraryDocument) {
   const metadata: Record<string, string> = { source: 'korwell-documents' }
   if (document.createdAt) metadata.created_at = document.createdAt
   if (document.author) metadata.author = document.author
+  if (document.fileName) metadata.file_name = document.fileName
+  if (document.uploadedBy) metadata.uploaded_by = document.uploadedBy
   return {
     id: document.id,
     title: document.title || 'Untitled',

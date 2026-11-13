@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { decodeTextBytes, type DetectedEncoding } from '#shared/utils/text'
 import { useSaveDocumentMutation } from '~/mutations/documents'
+import { documentPath } from '~/queries/documents'
 
 // PDF, Word, Excel, and CSV files are sent as-is and converted to text on the server.
 const CONVERTIBLE = /\.(pdf|docx|xlsx|xlsm|xlsb|xls|csv)$/i
@@ -23,6 +25,20 @@ const fileInput = ref<HTMLInputElement | null>(null)
 // The file currently attached (by drop or picker). Nothing is uploaded until Save.
 const pickedName = ref('')
 const pickedIsText = ref(false)
+// Saved with the document so the Library can show and search the original file.
+const pickedFile = ref<{ name: string, size: number, type: string } | null>(null)
+// Set when a text file was not UTF-8 (e.g. Windows-1250 from Excel) and was converted.
+const pickedEncoding = ref<DetectedEncoding | null>(null)
+const LEGACY_ENCODING_LABELS: Partial<Record<DetectedEncoding, string>> = {
+  'windows-1250': 'Windows-1250',
+  'iso-8859-2': 'ISO-8859-2',
+  'utf-16le': 'UTF-16',
+  'utf-16be': 'UTF-16'
+}
+const encodingNote = computed(() => {
+  const label = pickedEncoding.value && LEGACY_ENCODING_LABELS[pickedEncoding.value]
+  return label ? `Read as ${label} and converted to UTF-8, so č, š and ž are kept.` : ''
+})
 // Title filled in from the last file, so picking another file can replace it
 // without overwriting a title the person typed.
 let autoTitle = ''
@@ -33,6 +49,8 @@ function clearFile () {
   convertFile.value = null
   pickedName.value = ''
   pickedIsText.value = false
+  pickedFile.value = null
+  pickedEncoding.value = null
   autoTitle = ''
   resetInput()
 }
@@ -66,6 +84,8 @@ function takeFile (file: File) {
     convertFile.value = file
     pickedName.value = file.name
     pickedIsText.value = false
+    pickedFile.value = { name: file.name, size: file.size, type: file.type }
+    pickedEncoding.value = null
     setTitleFrom(file.name.replace(CONVERTIBLE, ''))
     return
   }
@@ -79,18 +99,20 @@ function takeFile (file: File) {
     resetInput()
     return
   }
-  const reader = new FileReader()
-  reader.onload = () => {
+  // Read the bytes, not readAsText: that assumes UTF-8 and turns a Windows-1250
+  // "č" into "�". decodeTextBytes detects the encoding first.
+  file.arrayBuffer().then((buffer) => {
+    const { text, encoding } = decodeTextBytes(new Uint8Array(buffer))
     convertFile.value = null
-    body.value = String(reader.result || '')
+    body.value = text
     pickedName.value = file.name
     pickedIsText.value = true
+    pickedFile.value = { name: file.name, size: file.size, type: file.type }
+    pickedEncoding.value = encoding
     setTitleFrom(file.name.replace(TEXT, ''))
-  }
-  reader.onerror = () => {
+  }, () => {
     fileError.value = 'Couldn’t read that file. Try saving it as plain text first.'
-  }
-  reader.readAsText(file)
+  })
 }
 
 // The whole page is a drop target, so a file dropped next to the zone (or on the
@@ -148,10 +170,16 @@ onBeforeUnmount(() => {
 })
 
 function requestBody () {
-  if (!convertFile.value) return { title: title.value, author: author.value, body: body.value }
+  if (!convertFile.value) {
+    // A text file's contents are in the body; `file` records where they came from.
+    const file = pickedIsText.value ? pickedFile.value : null
+    return { title: title.value, author: author.value, body: body.value, ...(file ? { file } : {}) }
+  }
   const form = new FormData()
   form.append('title', title.value)
   form.append('author', author.value)
+  // Its own field, so names with ";" or "=" reach the server intact.
+  form.append('fileName', convertFile.value.name)
   form.append('file', convertFile.value)
   return form
 }
@@ -162,8 +190,8 @@ async function saveDocument () {
   fileError.value = ''
   try {
     const saved = await saveNewDocument(requestBody())
-    // Open the new document in the Library (its list is already invalidated).
-    await navigateTo({ path: '/library', query: { document: saved.id } })
+    // Open the new document's page (the Library list is already invalidated).
+    await navigateTo(documentPath(saved.id))
   } catch {
     // Shown from `saveError`. The form keeps its contents so nothing is lost.
   }
@@ -205,6 +233,7 @@ async function saveDocument () {
               <strong><span aria-hidden="true">✓ </span>{{ pickedName }} added</strong>
               <span class="dropzone-hint">
                 {{ pickedIsText ? 'Its text is in the body above.' : 'It is converted to text when you save.' }}
+                <template v-if="encodingNote">{{ encodingNote }}</template>
                 Drop or click to choose a different file.
               </span>
             </template>

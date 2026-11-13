@@ -79,8 +79,8 @@ test('search and fetch match the ChatGPT result shapes and pass filters through'
   const payload = JSON.parse(found.content[0].text)
   assert.deepEqual(payload, found.structuredContent)
   assert.deepEqual(payload.results, [
-    { id: 'doc-1', title: 'Quarterly plan', url: `${origin}/library?document=doc-1` },
-    { id: 'doc-2', title: 'Notes', url: `${origin}/library?document=doc-2` }
+    { id: 'doc-1', title: 'Quarterly plan', url: `${origin}/library/doc-1` },
+    { id: 'doc-2', title: 'Notes', url: `${origin}/library/doc-2` }
   ])
   assert.deepEqual(api.calls[0], {
     query: 'plan',
@@ -93,7 +93,7 @@ test('search and fetch match the ChatGPT result shapes and pass filters through'
     id: 'doc-1',
     title: 'Quarterly plan',
     text: 'Full text of the plan.',
-    url: `${origin}/library?document=doc-1`,
+    url: `${origin}/library/doc-1`,
     metadata: { source: 'korwell-documents', created_at: '2026-05-01T00:00:00.000Z', author: 'Ada' }
   })
   const missing = await callTool(api, {}, 'key', origin, 'fetch', { arguments: { id: 'missing' } })

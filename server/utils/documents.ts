@@ -2,6 +2,7 @@ import { createError } from 'h3'
 import { readSearchCapabilities } from './capabilities'
 import { chunkText, ChunkLimitError } from './chunk'
 import { deleteDocumentObjects, markdownKey, sourceKey, type SourceFile } from './document-storage'
+import { contentHash, duplicateCheckEnabled, duplicateError, findDuplicate, hasContentHashColumn } from './duplicates'
 import { embedTexts } from './embeddings'
 import { ensureSchema } from './schema'
 import { useLocalVectors } from './vectors'
@@ -108,6 +109,16 @@ export async function saveDocument (env: DocLibraryEnv, apiKey: string, input: S
   }
   if (chunks.length === 0) badRequest('Document body is empty')
 
+  // Before embeddings, so a duplicate costs no OpenRouter call.
+  const hash = await hasContentHashColumn(env.DB) ? await contentHash(body) : null
+  if (hash && duplicateCheckEnabled(env.DUPLICATE_CHECK, process.env.DUPLICATE_CHECK)) {
+    const duplicate = await findDuplicate(env.DB, hash)
+    if (duplicate) {
+      console.log(JSON.stringify({ message: 'document_duplicate_rejected', existingId: duplicate.id }))
+      throw duplicateError(duplicate)
+    }
+  }
+
   const embeddings = await embedTexts(chunks, apiKey)
   const documentId = crypto.randomUUID()
   const createdAt = new Date().toISOString()
@@ -179,6 +190,7 @@ export async function saveDocument (env: DocLibraryEnv, apiKey: string, input: S
     columns.source_content_type = source?.contentType ?? null
     columns.source_size = source?.data.byteLength ?? null
   }
+  if (hash) columns.content_hash = hash
   const names = Object.keys(columns)
 
   try {

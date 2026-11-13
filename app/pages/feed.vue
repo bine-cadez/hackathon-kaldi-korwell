@@ -33,6 +33,14 @@ const convertFile = ref<File | null>(null)
 // Saving invalidates the cached Library list, so it shows the new document.
 const { mutateAsync: saveNewDocument, isLoading: saving, error: saveError, reset: dismissSaveError } = useSaveDocumentMutation()
 const saveMessage = ref('')
+// A 409 means this content is already in the archive; shown as a warning with a link.
+const duplicate = computed(() => duplicateOf(saveError.value))
+const duplicateDate = computed(() => {
+  const date = duplicate.value?.createdAt ? new Date(duplicate.value.createdAt) : null
+  return date && !Number.isNaN(date.getTime())
+    ? date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+    : ''
+})
 // Problems with the picked file, caught before anything is sent.
 const fileError = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -71,6 +79,7 @@ function onFile (event: Event) {
 
 // Shared by the file picker and drag-and-drop.
 function takeFile (file: File) {
+  dismissSaveError()
   fileError.value = ''
   saveMessage.value = ''
   if (CONVERTIBLE.test(file.name)) {
@@ -262,8 +271,20 @@ async function saveDocument () {
         </div>
         <p v-if="saveMessage" class="ok" role="status">{{ saveMessage }}</p>
         <p v-if="fileError" class="err" role="alert">{{ fileError }}</p>
+        <div v-if="duplicate" class="duplicate-warning" role="alert">
+          <p class="duplicate-title">This document is already in the archive</p>
+          <p>
+            It matches
+            <NuxtLink :to="{ path: '/library', query: { document: duplicate.id } }">“{{ duplicate.title }}”</NuxtLink><template v-if="duplicateDate">, added {{ duplicateDate }}</template>.
+            Nothing was saved. Choose a different file, or open the existing one.
+          </p>
+          <div class="row">
+            <NuxtLink class="ghost button-link" :to="{ path: '/library', query: { document: duplicate.id } }">Open existing document</NuxtLink>
+            <button class="error-state-dismiss" type="button" @click="dismissSaveError()">Dismiss</button>
+          </div>
+        </div>
         <ErrorState
-          v-if="saveError"
+          v-else-if="saveError"
           :error="saveError"
           title="Couldn’t save the document"
           :retrying="saving"
@@ -289,6 +310,22 @@ async function saveDocument () {
 </template>
 
 <style scoped>
+.duplicate-warning {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--brand-orange) 55%, var(--line));
+  border-left-width: 4px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--brand-orange) 8%, var(--card));
+}
+
+.duplicate-warning p { margin: 0; }
+
+.duplicate-title { font-weight: 700; color: var(--warn); }
+
+.duplicate-warning a:not(.button-link) { color: var(--accent); font-weight: 600; }
+
 .dropzone {
   position: relative;
   display: grid;

@@ -64,6 +64,7 @@ npm test
 | `SLACK_SIGNING_SECRET` | Slack app signing secret. Unset = `POST /api/slack/events` returns not configured. Production: `npx wrangler secret put SLACK_SIGNING_SECRET` |
 | `SLACK_BOT_TOKEN`    | Bot token (`xoxb-…`) for `users.info`, history, and permalinks. Unset = messages still store, names stay blank. Production: `npx wrangler secret put SLACK_BOT_TOKEN` |
 | `SLACK_CHANNEL_IDS`  | Comma-separated allow list (`C…`, `G…`). Empty = archive nothing. Production: `npx wrangler secret put SLACK_CHANNEL_IDS` |
+| `DUPLICATE_CHECK`    | Optional. `off` allows duplicate uploads (testing). Unset = duplicates are refused. See [Duplicate uploads](#duplicate-uploads). |
 | `MCP_SIGNING_KEY`    | Signs MCP OAuth tokens. At least 32 characters. Empty disables `/mcp`. Production: `npx wrangler secret put MCP_SIGNING_KEY` |
 | `CHAT_MODEL`         | Optional. OpenRouter model id for the Ask page. Empty = `anthropic/claude-haiku-5.5`. Production: `npx wrangler secret put CHAT_MODEL` |
 
@@ -268,6 +269,21 @@ The upload time is the existing `created_at`.
 - Before `0005` is applied (PR previews share production D1), uploads still work and the original is still put in R2, but the row does not point to it and the uploader is not recorded.
 - `npm run dev` uses Wrangler's local R2 simulator, so no login is needed. Documents uploaded before this change have no original.
 
+## Duplicate uploads
+
+`migrations/0006_document_content_hash.sql` adds `documents.content_hash`, a SHA-256 of the normalized body (the text that gets chunked: CRLF to LF, trimmed). Before any embedding call, `POST /api/documents` looks for an existing document with the same hash. On a match it returns **409** with `{ data: { message, duplicate: { id, title, createdAt } } }`, and the upload page shows a warning that links to `/library?document=<id>`. Nothing is embedded or stored.
+
+Because the hash is taken from the extracted text, the same file renamed, uploaded with another title, or pasted as text also matches. Two different files that convert to the same text match as well.
+
+| `DUPLICATE_CHECK` | Behavior |
+| --- | --- |
+| Unset, empty, or anything else | On (default). |
+| `off`, `false`, `0`, `no` | Off. Duplicates are saved. The hash is still stored, so turning the check back on also covers documents uploaded in the meantime. |
+
+For `npm run dev`, set it in `.env` and restart. In production, set it as a Worker variable in the dashboard or with `npx wrangler secret put DUPLICATE_CHECK`. `GET /api/health` reports `duplicateCheck`.
+
+Documents saved before `0006` have no hash. Each duplicate check first hashes up to 50 of them in one D1 batch, so an older library is covered after a few uploads. Until `0006` is applied (PR previews do not run migrations), no hash is written and the check is skipped. Saves work as before.
+
 ## Keyword search and dates
 
 `migrations/0002_document_search.sql` adds:
@@ -338,6 +354,7 @@ migrations/0001_init.sql
 migrations/0002_document_search.sql   author column and FTS5
 migrations/0003_slack_archive.sql
 migrations/0004_mcp_used_codes.sql    single-use MCP authorization codes
+migrations/0006_document_content_hash.sql   duplicate upload detection
 docs/slack-app-manifest.yml
 server/api/             upload, list, search, Slack events
 server/routes/          MCP endpoint and OAuth authorize, token, register

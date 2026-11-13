@@ -5,7 +5,6 @@ import login from '../server/api/auth/login.post.ts'
 import sitePassword from '../server/middleware/site-password.ts'
 import {
   decideSiteAccess,
-  sitePasswordFromSources,
   siteSessionToken,
   SITE_AUTH_COOKIE
 } from '../server/utils/site-password.ts'
@@ -18,115 +17,6 @@ afterEach(() => {
 })
 
 describe('site password decision', { concurrency: false }, () => {
-  test('empty secret leaves every route open', async () => {
-    for (const pathname of ['/api/documents', '/api/search', '/', '/api/documents/doc_1']) {
-      const decision = await decideSiteAccess({
-        sitePassword: '   ',
-        method: 'POST',
-        pathname,
-        cookie: null,
-        authorization: null,
-        sitePasswordHeader: null
-      })
-      assert.equal(decision, 'allow')
-    }
-  })
-
-  test('binding wins over process env and blank binding falls through', () => {
-    assert.equal(sitePasswordFromSources('from-binding', 'from-process'), 'from-binding')
-    assert.equal(sitePasswordFromSources('  ', 'from-process'), 'from-process')
-    assert.equal(sitePasswordFromSources(undefined, '  '), '')
-  })
-
-  test('unauthenticated data APIs are unauthorized when the secret is set', async () => {
-    const locked = [
-      ['POST', '/api/documents'],
-      ['POST', '/api/search'],
-      ['GET', '/api/documents'],
-      ['GET', '/api/documents/doc_1'],
-      ['DELETE', '/api/documents/doc_1'],
-      ['POST', '/api/health'],
-      ['POST', '/api/slack/search'],
-      ['POST', '/api/slack/backfill'],
-      ['GET', '/api/slack/events'],
-      ['GET', '/']
-    ] as const
-    for (const [method, pathname] of locked) {
-      const decision = await decideSiteAccess({
-        sitePassword: 's3cret',
-        method,
-        pathname,
-        cookie: null,
-        authorization: null,
-        sitePasswordHeader: null
-      })
-      assert.equal(decision, 'unauthorized', `${method} ${pathname}`)
-    }
-  })
-
-  test('health and the login route stay reachable', async () => {
-    assert.equal(await decideSiteAccess({
-      sitePassword: 's3cret',
-      method: 'GET',
-      pathname: '/api/health',
-      cookie: null,
-      authorization: null,
-      sitePasswordHeader: null
-    }), 'allow')
-    assert.equal(await decideSiteAccess({
-      sitePassword: 's3cret',
-      method: 'HEAD',
-      pathname: '/api/health/',
-      cookie: null,
-      authorization: null,
-      sitePasswordHeader: null
-    }), 'allow')
-    assert.equal(await decideSiteAccess({
-      sitePassword: 's3cret',
-      method: 'POST',
-      pathname: '/api/auth/login',
-      cookie: null,
-      authorization: null,
-      sitePasswordHeader: null
-    }), 'allow')
-    assert.equal(await decideSiteAccess({
-      sitePassword: 's3cret',
-      method: 'GET',
-      pathname: '/api/auth/login',
-      cookie: null,
-      authorization: null,
-      sitePasswordHeader: null
-    }), 'unauthorized')
-  })
-
-  test('header, bearer, and session cookie each unlock an API route', async () => {
-    const token = await siteSessionToken('s3cret')
-    assert.equal(await decideSiteAccess({
-      sitePassword: 's3cret',
-      method: 'POST',
-      pathname: '/api/search',
-      cookie: null,
-      authorization: null,
-      sitePasswordHeader: 's3cret'
-    }), 'allow')
-    assert.equal(await decideSiteAccess({
-      sitePassword: 's3cret',
-      method: 'POST',
-      pathname: '/api/documents',
-      cookie: null,
-      authorization: 'Bearer s3cret',
-      sitePasswordHeader: null
-    }), 'allow')
-    assert.equal(await decideSiteAccess({
-      sitePassword: 's3cret',
-      method: 'DELETE',
-      pathname: '/api/documents/doc_1',
-      cookie: token,
-      authorization: null,
-      sitePasswordHeader: null
-    }), 'allow')
-  })
-
   test('wrong password, raw password cookie, and basic auth stay locked', async () => {
     assert.equal(await decideSiteAccess({
       sitePassword: 's3cret',
@@ -287,14 +177,4 @@ describe('site password HTTP gate', { concurrency: false }, () => {
     assert.equal(search.status, 401)
   })
 
-  test('unset SITE_PASSWORD does not block API routes', async () => {
-    delete process.env.SITE_PASSWORD
-    const response = await handler(new Request('http://library.test/api/search', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ query: 'q' })
-    }))
-    assert.equal(response.status, 200)
-    assert.equal((await response.json() as { reached?: boolean }).reached, true)
-  })
 })

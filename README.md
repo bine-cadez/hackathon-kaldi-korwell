@@ -49,7 +49,7 @@ npm run build
 npm run preview
 ```
 
-Tests (chunking, embedding response parsing, file conversion, schema drift):
+Tests cover crucial behaviour only: security, data integrity, and core search, chat, and MCP flows. See [CLAUDE.md](CLAUDE.md#tests-crucial-behaviour-only) for what deserves a test.
 
 ```bash
 npm test

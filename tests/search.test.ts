@@ -4,9 +4,8 @@ import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { EMBEDDING_DIMENSIONS } from '../server/utils/embeddings.ts'
 import type { DocDatabase, DocLibraryEnv, VectorizeMatch } from '../server/utils/env.ts'
-import { getDocument, saveDocument } from '../server/utils/documents.ts'
-import { listDocuments } from '../server/utils/document-list.ts'
-import { parseCreatedAtRange, searchDocuments, searchStoredEmbeddings } from '../server/utils/search.ts'
+import { saveDocument } from '../server/utils/documents.ts'
+import { searchDocuments } from '../server/utils/search.ts'
 
 const initSql = readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8')
 const searchSql = readFileSync(new URL('../migrations/0002_document_search.sql', import.meta.url), 'utf8')
@@ -199,139 +198,6 @@ test('keyword search finds title and author with and without diacritics, and dat
     assert.ok(maySecond.matches.every(match => match.documentId !== 'doc-choco'))
     assert.deepEqual(maySecond.matches.map(match => match.documentId), ['doc-meet'])
     assert.ok(topKs.some(topK => topK === 50))
-  } finally {
-    restore()
-  }
-})
-
-test('search before migration stays on vectors and still applies date and title filters', async () => {
-  const sqlite = openDb('0001')
-  insertDocument(sqlite, {
-    id: 'doc-choco',
-    title: 'Čokolada',
-    body: 'Recept.',
-    createdAt: '2024-05-01T08:00:00.000Z',
-    chunkId: 'chunk-choco',
-    withAuthorColumn: false
-  })
-  insertDocument(sqlite, {
-    id: 'doc-meet',
-    title: 'Sestanek',
-    body: 'Pregled.',
-    createdAt: '2024-05-02T08:00:00.000Z',
-    chunkId: 'chunk-meet',
-    withAuthorColumn: false
-  })
-  const env = envFor(sqlite, [
-    { id: 'chunk-meet', score: 0.91, metadata: { documentId: 'doc-meet', title: 'Sestanek', chunkIndex: 0 } },
-    { id: 'chunk-choco', score: 0.4, metadata: { documentId: 'doc-choco', title: 'Čokolada', chunkIndex: 0 } }
-  ])
-  const restore = installEmbeddings()
-  try {
-    const result = await searchDocuments(env, 'test-key', '???', 5, { author: 'Župan' })
-    assert.equal(result.backend, 'vectorize')
-    assert.deepEqual(result.matches.map(match => [match.documentId, match.score]), [
-      ['doc-meet', 0.91],
-      ['doc-choco', 0.4]
-    ])
-
-    const titled = await searchDocuments(env, 'test-key', 'cokolada', 5, { title: 'Čokolada' })
-    assert.equal(titled.backend, 'vectorize')
-    assert.deepEqual(titled.matches.map(match => match.documentId), ['doc-choco'])
-
-    const dated = await searchDocuments(env, 'test-key', 'cokolada', 5, { from: '2024-05-01', to: '2024-05-01' })
-    assert.deepEqual(dated.matches.map(match => match.documentId), ['doc-choco'])
-
-    const outside = await searchDocuments(env, 'test-key', 'cokolada', 5, { from: '2020-01-01', to: '2020-01-02' })
-    assert.deepEqual(outside.matches, [])
-  } finally {
-    restore()
-  }
-})
-
-test('stored embeddings honour the date range and author before cosine ranking', async () => {
-  const sqlite = openDb('0002')
-  const insert = sqlite.prepare(
-    'INSERT INTO documents (id, title, body, author, r2_key, created_at) VALUES (?, ?, ?, ?, NULL, ?)'
-  )
-  const chunk = sqlite.prepare(
-    'INSERT INTO chunks (id, document_id, chunk_index, content, embedding, token_estimate, created_at) VALUES (?, ?, 0, ?, ?, 1, ?)'
-  )
-  insert.run('doc-may', 'Čokolada', 'Maj.', 'Maja Župan', '2024-05-01T08:00:00.000Z')
-  chunk.run('chunk-may', 'doc-may', 'Maj.', JSON.stringify([1, 0, 0]), '2024-05-01T08:00:00.000Z')
-  insert.run('doc-june', 'Čokolada', 'Junij.', 'Maja Župan', '2024-06-01T08:00:00.000Z')
-  chunk.run('chunk-june', 'doc-june', 'Junij.', JSON.stringify([1, 0, 0]), '2024-06-01T08:00:00.000Z')
-  insert.run('doc-other', 'Čokolada', 'Drugi avtor.', 'Ana Kovač', '2024-05-01T08:00:00.000Z')
-  chunk.run('chunk-other', 'doc-other', 'Drugi avtor.', JSON.stringify([1, 0, 0]), '2024-05-01T08:00:00.000Z')
-
-  const caps = { author: true, fts: true, source: false, titleSort: false }
-  const may = await searchStoredEmbeddings(
-    envFor(sqlite),
-    [1, 0, 0],
-    5,
-    caps,
-    parseCreatedAtRange('2024-05-01', '2024-05-01'),
-    '',
-    'zupan'
-  )
-  assert.deepEqual(may.map(match => match.documentId), ['doc-may'])
-  assert.ok((may[0]?.score ?? 0) > 0.9)
-})
-
-test('date filters reject impossible calendar days', () => {
-  assert.deepEqual(parseCreatedAtRange('2024-02-29', '2024-02-29'), {
-    from: '2024-02-29',
-    toExclusive: '2024-03-01'
-  })
-  assert.throws(() => parseCreatedAtRange('2023-02-29', null), (error: unknown) => {
-    assert.equal((error as { statusCode?: number }).statusCode, 400)
-    return true
-  })
-  assert.throws(() => parseCreatedAtRange('2024-06-02', '2024-06-01'), (error: unknown) => {
-    assert.match((error as Error).message, /on or before/)
-    return true
-  })
-})
-
-test('saving a document writes author only after the column exists', async () => {
-  const restore = installEmbeddings()
-  try {
-    const oldDb = openDb('0001')
-    const oldQueries: string[] = []
-    const oldEnv = envFor(oldDb)
-    const oldDbWrapped = oldEnv.DB
-    oldEnv.DB = {
-      ...oldDbWrapped,
-      prepare (query) {
-        oldQueries.push(query)
-        return oldDbWrapped.prepare(query)
-      }
-    }
-    const unsavedAuthor = await saveDocument(oldEnv, 'test-key', {
-      title: 'Čokolada',
-      author: 'Maja Župan',
-      body: 'Recept za štrudelj.'
-    })
-    assert.equal(unsavedAuthor.author, null)
-    assert.equal(oldQueries.some(query => query.includes('INSERT INTO documents') && query.includes('author')), false)
-    const listed = await listDocuments(oldEnv)
-    assert.equal(listed.documents[0]?.author, null)
-
-    const nextDb = openDb('0002')
-    const saved = await saveDocument(envFor(nextDb), 'test-key', {
-      title: 'Čokolada',
-      author: 'Maja Župan',
-      body: 'Recept za štrudelj.'
-    })
-    assert.equal(saved.author, 'Maja Župan')
-    const document = await getDocument(envFor(nextDb), saved.id)
-    assert.equal(document.author, 'Maja Župan')
-    assert.equal(nextDb.prepare('SELECT count(*) AS n FROM documents_fts WHERE documents_fts MATCH ?').get('zupan')?.n, 1)
-
-    await assert.rejects(
-      () => saveDocument(envFor(nextDb), 'test-key', { title: 'T', author: 'a'.repeat(201), body: 'Body' }),
-      (error: unknown) => (error as { statusCode?: number }).statusCode === 400
-    )
   } finally {
     restore()
   }

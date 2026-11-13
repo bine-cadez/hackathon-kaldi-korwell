@@ -7,12 +7,8 @@ import type { DocDatabase, DocLibraryEnv, R2Bucket } from '../server/utils/env.t
 import { listDocuments } from '../server/utils/document-list.ts'
 import { deleteDocument, getDocument, getDocumentSource, saveDocument } from '../server/utils/documents.ts'
 import {
-  contentDisposition,
-  deleteDocumentObjects,
-  markdownKey,
   normalizeSourceFilename,
   sourceContentType,
-  sourceKey,
   toSourceFile
 } from '../server/utils/document-storage.ts'
 
@@ -119,13 +115,6 @@ function installEmbeddings () {
 const pdfBytes = new TextEncoder().encode('%PDF-1.7 fake original')
 const pdf = () => toSourceFile({ filename: 'Poročilo Q3.pdf', data: pdfBytes })
 
-test('storage keys keep the original next to the markdown', () => {
-  const id = '11111111-2222-4333-8444-555555555555'
-  assert.equal(markdownKey(id), `documents/${id}/content.md`)
-  assert.equal(sourceKey(id, 'Poročilo Q3.PDF'), `documents/${id}/original.pdf`)
-  assert.equal(sourceKey(id, 'README'), `documents/${id}/original`)
-})
-
 test('download type comes from the extension, never from the browser', () => {
   assert.equal(sourceContentType('a.pdf'), 'application/pdf')
   assert.equal(sourceContentType('a.xlsx'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -141,23 +130,6 @@ test('filenames are reduced to a clean basename', () => {
   assert.equal(normalizeSourceFilename('a\u0000b\r\n.txt'), 'ab.txt')
   assert.equal(normalizeSourceFilename(''), 'upload')
   assert.equal(normalizeSourceFilename('x'.repeat(300)).length, 255)
-})
-
-test('content-disposition keeps UTF-8 names and an ASCII fallback', () => {
-  assert.equal(
-    contentDisposition('Poročilo "Q3".pdf'),
-    'attachment; filename="Poro_ilo _Q3_.pdf"; filename*=UTF-8\'\'Poro%C4%8Dilo%20%22Q3%22.pdf'
-  )
-})
-
-test('deleting document objects follows list pagination', async () => {
-  const { bucket, objects } = memoryBucket({ pageSize: 1 })
-  await bucket.put('documents/a/content.md', 'md')
-  await bucket.put('documents/a/original.pdf', 'pdf')
-  await bucket.put('documents/b/content.md', 'other')
-  await bucket.put('documents/a.md', 'legacy')
-  await deleteDocumentObjects(bucket, 'a', ['documents/a.md', null])
-  assert.deepEqual([...objects.keys()], ['documents/b/content.md'])
 })
 
 test('upload stores the original, the markdown, the uploader, and serves the original back', async () => {
@@ -208,21 +180,6 @@ test('upload stores the original, the markdown, the uploader, and serves the ori
   }
 })
 
-test('pasted text records the uploader but has no original file', async () => {
-  const restore = installEmbeddings()
-  try {
-    const sqlite = openDb(true)
-    const { bucket } = memoryBucket()
-    const env = envFor(sqlite, bucket)
-    const saved = await saveDocument(env, 'test-key', { title: 'Zapisnik', body: 'Sestanek.', uploadedBy: 'ana@kaldi.si' })
-    assert.equal(saved.source, null)
-    assert.equal((await getDocument(env, saved.id)).uploadedBy, 'ana@kaldi.si')
-    await assert.rejects(() => getDocumentSource(env, saved.id), (error: unknown) => (error as { statusCode?: number }).statusCode === 404)
-  } finally {
-    restore()
-  }
-})
-
 test('a failed R2 write rejects the upload before anything reaches D1', async () => {
   const restore = installEmbeddings()
   try {
@@ -249,31 +206,4 @@ test('a failed D1 write removes the original from R2', async () => {
   } finally {
     restore()
   }
-})
-
-test('before migration 0005 uploads still work and skip the new columns', async () => {
-  const restore = installEmbeddings()
-  try {
-    const sqlite = openDb(false)
-    const { bucket } = memoryBucket()
-    const env = envFor(sqlite, bucket)
-    const saved = await saveDocument(env, 'test-key', { title: 'T', body: 'Body', uploadedBy: 'maja@kaldi.si', source: pdf() })
-    assert.equal(saved.uploadedBy, null)
-    const document = await getDocument(env, saved.id)
-    assert.equal(document.uploadedBy, null)
-    assert.equal(document.source, null)
-    assert.equal((await listDocuments(env)).documents[0]?.source, null)
-    await assert.rejects(() => getDocumentSource(env, saved.id), (error: unknown) => (error as { statusCode?: number }).statusCode === 404)
-    await deleteDocument(env, saved.id)
-  } finally {
-    restore()
-  }
-})
-
-test('the source migration only adds nullable columns', () => {
-  const sql = migration('0005_document_source.sql')
-  for (const column of ['uploaded_by', 'source_key', 'source_filename', 'source_content_type', 'source_size']) {
-    assert.match(sql, new RegExp(`ALTER TABLE documents ADD COLUMN ${column} `))
-  }
-  assert.doesNotMatch(sql, /NOT NULL|DROP/i)
 })

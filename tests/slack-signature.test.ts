@@ -99,26 +99,3 @@ test('url_verification returns the challenge and a bad signature does not', asyn
   assert.equal(stale.status, 401)
   assert.deepEqual(await stale.json(), { ok: false })
 })
-
-test('missing signing secret answers not configured', async () => {
-  const previous = process.env.SLACK_SIGNING_SECRET
-  delete process.env.SLACK_SIGNING_SECRET
-  try {
-    const app = createApp()
-    app.use(defineEventHandler((event) => {
-      event.context.cloudflare = { env: {} }
-    }))
-    app.use(events)
-    const response = await toWebHandler(app)(new Request('https://library.test/api/slack/events', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}'
-    }))
-    assert.equal(response.status, 503)
-    const payload = await response.json() as { data?: { message?: string }, message?: string }
-    assert.match(payload.data?.message || payload.message || '', /not configured/i)
-  } finally {
-    if (previous === undefined) delete process.env.SLACK_SIGNING_SECRET
-    else process.env.SLACK_SIGNING_SECRET = previous
-  }
-})

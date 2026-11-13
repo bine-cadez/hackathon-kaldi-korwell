@@ -10,7 +10,7 @@ useHead({
 </script>
 
 <template>
-  <div>
+  <div class="archive-app">
     <NuxtRouteAnnouncer />
     <header class="archive-header">
       <NuxtLink class="archive-brand" to="/">The Kaldi Archive</NuxtLink>

@@ -99,14 +99,14 @@ async function runSearch () {
           </svg>
         </button>
       </div>
-      <div class="slack-filters">
+      <div class="search-filters">
         <label>
           Channel
-          <input v-model="channel" type="text" name="channel" maxlength="200" placeholder="Name or channel id">
+          <input v-model="channel" type="text" name="channel" maxlength="200" placeholder="Name or channel ID">
         </label>
         <label>
           Person
-          <input v-model="user" type="text" name="user" maxlength="200" placeholder="Name or user id">
+          <input v-model="user" type="text" name="user" maxlength="200" placeholder="Name or user ID">
         </label>
         <label>
           From

@@ -51,7 +51,12 @@ async function readDocumentInput (event: Parameters<typeof readBody>[0]) {
 export default defineEventHandler(async (event) => {
   try {
     const input = await readDocumentInput(event)
-    return await saveDocument(requireEnv(event), requireOpenRouterApiKey(event), input)
+    const saved = await saveDocument(requireEnv(event), requireOpenRouterApiKey(event), input)
+    if (!import.meta.dev) return saved
+
+    // Count the saved text for the local Panem preview, including converted files.
+    const wordCount = input.body.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0
+    return { ...saved, wordCount }
   } catch (error) {
     throw toHttpError(error)
   }

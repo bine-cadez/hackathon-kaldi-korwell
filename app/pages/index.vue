@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useQuery } from '@pinia/colada'
+import { documentByIdQuery } from '~/queries/documents'
+
 interface SearchMatch {
   chunkId: string
   documentId: string
@@ -8,16 +11,6 @@ interface SearchMatch {
   chunkIndex: number
   content: string
   score: number
-}
-
-interface DocumentDetail {
-  id: string
-  title: string
-  author?: string | null
-  body: string
-  createdAt: string
-  r2Key: string | null
-  chunks: Array<{ id: string, chunkIndex: number, content: string }>
 }
 
 // Excerpts checked against the text of Nineteen Eighty-Four, Parts I and II.
@@ -72,11 +65,18 @@ const queryInput = ref<HTMLInputElement | null>(null)
 const queryInvalid = ref(false)
 const searching = ref(false)
 const searched = ref(false)
-const searchError = ref('')
+// Raw error so ErrorState can tell a network failure from a server one.
+const searchError = ref<unknown>(null)
 const matches = ref<SearchMatch[]>([])
 
-const selected = ref<DocumentDetail | null>(null)
-const detailError = ref('')
+// Shares the document cache with the Library, so a document opened in either is instant in the other.
+const openedId = ref<string | null>(null)
+const request = useRequestFetch()
+const { data: selected, error: detailError, isPending: detailPending, asyncStatus: detailAsyncStatus, refetch: retryDetail } = useQuery(() => ({
+  ...documentByIdQuery({ id: openedId.value ?? '', request }),
+  enabled: !!openedId.value
+}))
+const openedMatch = computed(() => matches.value.find(match => match.documentId === openedId.value))
 
 let caretFrame = 0
 let caretMeasure: CanvasRenderingContext2D | null = null
@@ -131,9 +131,8 @@ async function runSearch () {
   queryInvalid.value = false
   searching.value = true
   searched.value = true
-  selected.value = null
-  detailError.value = ''
-  searchError.value = ''
+  openedId.value = null
+  searchError.value = null
   try {
     if (preview.value) {
       await new Promise(resolve => setTimeout(resolve, 3000))
@@ -161,20 +160,14 @@ async function runSearch () {
     matches.value = result.matches
   } catch (error) {
     matches.value = []
-    searchError.value = errorMessage(error)
+    searchError.value = error
   } finally {
     searching.value = false
   }
 }
 
-async function openDocument (id: string) {
-  detailError.value = ''
-  try {
-    selected.value = await $fetch<DocumentDetail>(`/api/documents/${id}`)
-  } catch (error) {
-    selected.value = null
-    detailError.value = errorMessage(error)
-  }
+function openDocument (id: string) {
+  openedId.value = id
 }
 </script>
 
@@ -231,8 +224,11 @@ async function openDocument (id: string) {
     </section>
 
     <section v-if="corpus === 'documents' && searched" class="search-results" aria-label="Search results" :aria-busy="searching">
-      <p v-if="searching" role="status">Searching the archive…</p>
-      <p v-else-if="searchError" class="err" role="alert">{{ searchError }}</p>
+      <template v-if="searching">
+        <p role="status" class="sr-only">Searching the archive…</p>
+        <ResultSkeleton />
+      </template>
+      <ErrorState v-else-if="searchError" :error="searchError" title="Search didn’t finish" @retry="runSearch()" />
       <p v-else-if="!matches.length" role="status">No matching passages found. Try a different search.</p>
       <template v-else>
         <h2>{{ preview ? `${matches.length} sample results` : 'From the archive' }}</h2>
@@ -246,8 +242,23 @@ async function openDocument (id: string) {
             <button v-if="match.documentId" class="ghost" type="button" @click="openDocument(match.documentId)">Open document</button>
           </li>
         </ol>
-        <p v-if="detailError" class="err" role="alert">{{ detailError }}</p>
-        <article v-if="selected" class="card">
+        <article v-if="openedId && detailError" class="card">
+          <h2>{{ openedMatch?.title || 'Document' }}</h2>
+          <ErrorState
+            :error="detailError"
+            title="Couldn’t open this document"
+            :retrying="detailAsyncStatus === 'loading'"
+            @retry="retryDetail()"
+            @dismiss="openedId = null"
+          />
+        </article>
+        <article v-else-if="openedId && detailPending" class="card" aria-busy="true">
+          <h2>{{ openedMatch?.title || 'Opening document' }}</h2>
+          <p v-if="openedMatch?.author" class="meta">{{ openedMatch.author }}</p>
+          <p role="status" class="sr-only">Opening {{ openedMatch?.title || 'document' }}…</p>
+          <DocBodySkeleton />
+        </article>
+        <article v-else-if="openedId && selected" class="card">
           <h2>{{ selected.title }}</h2>
           <p v-if="selected.author" class="meta">{{ selected.author }}</p>
           <pre class="body">{{ selected.body }}</pre>

@@ -30,7 +30,23 @@ interface SchemaDb {
   }
 }
 
-export async function ensureSchema (db: SchemaDb) {
+// The base tables never go away once created, so check once per Worker isolate
+// instead of paying four sequential D1 round trips on every request.
+const schemaReady = new WeakMap<SchemaDb, Promise<void>>()
+
+export function ensureSchema (db: SchemaDb): Promise<void> {
+  let ready = schemaReady.get(db)
+  if (!ready) {
+    ready = applySchema(db).catch((error) => {
+      schemaReady.delete(db)
+      throw error
+    })
+    schemaReady.set(db, ready)
+  }
+  return ready
+}
+
+async function applySchema (db: SchemaDb) {
   // Local D1 exec rejects a multi-line script ("incomplete input" on the first line).
   // Run one collapsed statement at a time. Wrangler migrations still use the formatted file.
   const statements = SCHEMA_SQL

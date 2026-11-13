@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { EYE_COLOR_TIME, EYE_COUNT, pullPath, REFILL_TIME, RIPPLE_TIME, UPLOAD_COLOR_TIME } from '~/utils/eyeField'
+
 const props = defineProps<{
   anchor: HTMLElement | null
   form: HTMLFormElement | null
@@ -12,7 +14,7 @@ const emit = defineEmits<{
   eyeBlackHole: [open: boolean]
   appetite: [filled: number]
 }>()
-const eyeCount = 2_000
+const eyeCount = EYE_COUNT
 const demoGoal = 24_000
 const wordsPerEye = demoGoal / eyeCount
 const roundLength = 5
@@ -21,10 +23,10 @@ const travelTime = 1750
 const returnTime = 1100
 const woltFlightTime = 4000
 const fillTime = 550
-const eyeColorTime = 500
-const refillTime = 3600
-const uploadColorTime = 4000
-const rippleTime = uploadColorTime - eyeColorTime
+const eyeColorTime = EYE_COLOR_TIME
+const refillTime = REFILL_TIME
+const uploadColorTime = UPLOAD_COLOR_TIME
+const rippleTime = RIPPLE_TIME
 const vortex = ref({ x: 0, y: 0 })
 const woltFlying = ref(false)
 const format = new Intl.NumberFormat('en')
@@ -60,7 +62,8 @@ type RewardPhase = 'collecting' | 'full' | 'swallowing' | 'wolt' | 'voucher'
 const phase = ref<RewardPhase>('collecting')
 const preview = ref<{ previousPhase: RewardPhase, filledEyes: number, voucher: string } | null>(null)
 const uploadWords = ref(0)
-const uploadFill = ref<{ start: number, count: number } | null>(null)
+// True while a saved document's colour ripples out from the main eye.
+const uploadFill = ref(false)
 let finishUploadColor: (() => void) | undefined
 const showingProgress = computed(() => phase.value === 'collecting' || phase.value === 'full' || phase.value === 'swallowing')
 const refillStart = computed(() => preview.value?.filledEyes ?? (showingProgress.value ? (words.value + uploadWords.value) / wordsPerEye : 0))
@@ -79,75 +82,6 @@ let introTimer: ReturnType<typeof setTimeout> | undefined
 let revealTimer: ReturnType<typeof setTimeout> | undefined
 let woltFlight: Animation | undefined
 let followFrame = 0
-
-function scatter (index: number, offset: number) {
-  // Integer hashing gives the server and browser the same layout.
-  let value = Math.imul(index + 1, 0x9e3779b1) ^ Math.imul(offset, 0x85ebca6b)
-  value = Math.imul(value ^ (value >>> 16), 0x7feb352d)
-  value = Math.imul(value ^ (value >>> 15), 0x846ca68b)
-  return ((value ^ (value >>> 16)) >>> 0) / 0x100000000
-}
-
-// Keep the shuffle stable so saved progress colors the same eyes on reload.
-const fillRanks = Array.from({ length: eyeCount }, (_, index) => index)
-for (let index = fillRanks.length - 1; index > 0; index--) {
-  const other = Math.floor(scatter(index, 6) * (index + 1))
-  const rank = fillRanks[index]!
-  fillRanks[index] = fillRanks[other]!
-  fillRanks[other] = rank
-}
-
-const layout = computed(() => {
-  const { width, height } = fieldSize.value
-  // Keep the eyes about the same size on every screen, so a phone draws fewer of
-  // them. Any first part of the list is still spread evenly over the page, and
-  // its fill order still covers the whole range, so progress looks the same.
-  const count = Math.max(500, Math.min(eyeCount, Math.round(width * height / 540)))
-  const spacing = Math.sqrt(width * height / count)
-  const columns = Math.ceil(width / spacing)
-  const rows = Math.ceil(height / spacing)
-  const buckets = new Map<number, { x: number, y: number }[]>()
-
-  function clearance (x: number, y: number) {
-    const col = Math.floor(x / spacing)
-    const row = Math.floor(y / spacing)
-    let nearest = spacing ** 2
-    for (let r = Math.max(0, row - 1); r <= Math.min(rows - 1, row + 1); r++) {
-      for (let c = Math.max(0, col - 1); c <= Math.min(columns - 1, col + 1); c++) {
-        for (const point of buckets.get(r * columns + c) ?? []) {
-          nearest = Math.min(nearest, (point.x - x) ** 2 + (point.y - y) ** 2)
-        }
-      }
-    }
-    return nearest
-  }
-
-  // Try several random positions and keep the one with the most room around it.
-  const eyes = Array.from({ length: count }, (_, index) => {
-    let best = { x: 0, y: 0, clearance: -1 }
-    for (let attempt = 0; attempt < 12; attempt++) {
-      const candidate = index * 12 + attempt
-      const x = scatter(candidate, 1) * width
-      const y = scatter(candidate, 2) * height
-      const distance = clearance(x, y)
-      if (distance > best.clearance) best = { x, y, clearance: distance }
-    }
-    const key = Math.floor(best.y / spacing) * columns + Math.floor(best.x / spacing)
-    const bucket = buckets.get(key) ?? []
-    bucket.push(best)
-    buckets.set(key, bucket)
-
-    return {
-      x: best.x * 100 / width,
-      y: best.y * 100 / height,
-      angle: -24 + scatter(index, 3) * 48,
-      size: 0.72 + scatter(index, 4) * 0.44,
-      delay: Math.round(scatter(index, 5) * 380),
-      fillOrder: fillRanks[index]!
-    }
-  })
-  return { eyes, size: spacing * 1.23 }
-})
 
 function measureField () {
   const bounds = field.value?.getBoundingClientRect()
@@ -168,47 +102,19 @@ function measureField () {
   }
 }
 
+// The five eyes around the form follow the same pull as the canvas eyes, a little earlier.
 function pullStyle (x: number, y: number, index: number) {
-  const dx = vortex.value.x - x
-  const dy = vortex.value.y - y
-  const rank = scatter(index, 7) * (index < eyeCount ? 1 : 0.55)
-  // Few eyes start early. Most start in the last stretch, and travel faster.
-  const start = 650 + Math.pow(rank, 0.26) * 3550
-  const duration = 2000 - Math.sqrt(rank) * 1000 - scatter(index, 11) * 450
-  const reach = 0.4 + scatter(index, 8) * 0.32
-  const bend = 0.12 + scatter(index, 9) * 0.38
-  const spin = 230 + scatter(index, 10) * 270
+  const pull = pullPath(x, y, vortex.value, eyeCount + index, true)
   return {
-    '--pull-x': dx + 'px',
-    '--pull-y': dy + 'px',
-    '--curve-x': (dx * reach - dy * bend) + 'px',
-    '--curve-y': (dy * reach + dx * bend) + 'px',
-    '--curve-spin': Math.round(spin * 0.4) + 'deg',
-    '--pull-spin': Math.round(spin) + 'deg',
-    '--pull-delay': Math.round(start) + 'ms',
-    '--pull-duration': Math.round(duration) + 'ms'
+    '--pull-x': pull.dx + 'px',
+    '--pull-y': pull.dy + 'px',
+    '--curve-x': pull.curveX + 'px',
+    '--curve-y': pull.curveY + 'px',
+    '--curve-spin': pull.curveSpin + 'deg',
+    '--pull-spin': pull.pullSpin + 'deg',
+    '--pull-delay': pull.delay + 'ms',
+    '--pull-duration': pull.duration + 'ms'
   }
-}
-
-function borderEyeStyle (eye: typeof borderEyes[number], index: number) {
-  const { x, y } = borderEyePosition(eye)
-  return {
-    left: x + 'px',
-    top: y + 'px',
-    width: eye.width + 'px',
-    '--rest-opacity': eye.opacity,
-    '--angle': eye.angle + 'deg',
-    ...(phase.value === 'swallowing' ? pullStyle(x, y, eyeCount + index) : {})
-  }
-}
-
-function eyeFill (fillOrder: number) {
-  return Math.max(0, Math.min(100, (refillStart.value - fillOrder) * 100))
-}
-
-function refillDelay (fillOrder: number) {
-  const remaining = Math.max(1, eyeCount - refillStart.value)
-  return Math.max(0, (fillOrder - refillStart.value) / remaining) * refillTime
 }
 
 // How far the colour has to travel from the main eye to the farthest corner.
@@ -219,17 +125,20 @@ const rippleReach = computed(() => {
   return Math.max(1, Math.hypot(Math.max(x, width - x), Math.max(y, height - y)))
 })
 
-// A saved document's colour spreads outward from the main eye, like a ripple:
-// the nearer an eye is, the sooner it lights up.
-function uploadDelay (eye: { x: number, y: number }) {
-  if (!uploadFill.value) return 0
-  const { width, height } = fieldSize.value
-  const distance = Math.hypot((eye.x - source.value.x) * width / 100, (eye.y - source.value.y) * height / 100)
-  return Math.min(1, distance / rippleReach.value) * rippleTime
-}
-
 // The main eye's pupil widens a little as the eyes fill (ArchiveEye's appetite).
 watch(refillStart, (filled) => emit('appetite', Math.min(1, filled / eyeCount)), { immediate: true })
+
+function borderEyeStyle (eye: typeof borderEyes[number], index: number) {
+  const { x, y } = borderEyePosition(eye)
+  return {
+    left: x + 'px',
+    top: y + 'px',
+    width: eye.width + 'px',
+    '--rest-opacity': eye.opacity,
+    '--angle': eye.angle + 'deg',
+    ...(phase.value === 'swallowing' ? pullStyle(x, y, index) : {})
+  }
+}
 
 watch(() => props.form, (form, previousForm) => {
   if (previousForm) observer?.unobserve(previousForm)
@@ -335,10 +244,7 @@ async function colorSavedDocument (wordCount: number) {
   preview.value = null
   phase.value = 'collecting'
   await nextTick()
-  // Commit the starting color state before setting the new fill level.
-  field.value?.getBoundingClientRect()
 
-  const start = refillStart.value
   if (props.rewardsEnabled && !props.demo) {
     lastAdded.value = wordCount
     words.value += wordCount
@@ -349,14 +255,13 @@ async function colorSavedDocument (wordCount: number) {
   }
 
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    const end = Math.min(eyeCount, refillStart.value)
-    uploadFill.value = { start: Math.floor(start), count: Math.ceil(end) - Math.floor(start) }
+    uploadFill.value = true
     await new Promise<void>((resolve) => {
       finishUploadColor = resolve
       revealTimer = setTimeout(resolve, uploadColorTime + 100)
     })
     finishUploadColor = undefined
-    uploadFill.value = null
+    uploadFill.value = false
   }
 
   phase.value = previousPhase
@@ -555,41 +460,16 @@ onBeforeUnmount(() => {
       </defs>
     </svg>
 
-    <div
-      ref="field"
-      class="eye-field"
-      :class="[intro, { swallowing: phase === 'swallowing', refilled: preview && showingProgress, 'eyes-hidden': !showingProgress }]"
-      :style="{
-        '--origin-x': source.x,
-        '--origin-y': source.y,
-        '--field-w': fieldSize.width,
-        '--field-h': fieldSize.height,
-        '--eye-width': layout.size + 'px'
-      }"
-      aria-hidden="true"
-    >
-      <svg
-        v-for="(eye, index) in layout.eyes"
-        :key="index"
-        class="small-eye"
-        viewBox="0 0 240 120"
-        :style="{
-          '--x': eye.x,
-          '--y': eye.y,
-          '--angle': eye.angle + 'deg',
-          '--size': eye.size,
-          '--delay': eye.delay + 'ms',
-          '--unfilled': 100 - eyeFill(eye.fillOrder) + '%',
-          ...(uploadFill ? { '--upload-delay': uploadDelay(eye) + 'ms' } : {}),
-          ...(preview ? { '--refill-delay': refillDelay(eye.fillOrder) + 'ms' } : {}),
-          ...(phase === 'swallowing'
-            ? pullStyle(eye.x * fieldSize.width / 100, eye.y * fieldSize.height / 100, index)
-            : {})
-        }"
-      >
-        <use href="#panem-eye-lines" />
-        <g class="eye-color"><use href="#panem-eye-color" /></g>
-      </svg>
+    <div ref="field" class="eye-field" :class="{ swallowing: phase === 'swallowing' }">
+      <EyeField
+        :intro="intro"
+        :origin="source"
+        :filled="refillStart"
+        :refill="Boolean(preview && showingProgress)"
+        :ripple="uploadFill ? rippleReach : null"
+        :hidden="!showingProgress"
+        :vortex="phase === 'swallowing' ? vortex : null"
+      />
       <span
         v-if="uploadFill"
         class="feed-ripple"
@@ -708,20 +588,10 @@ onBeforeUnmount(() => {
   transform: translate(-50%, -50%) rotate(var(--angle));
 }
 
-.small-eye {
-  position: absolute;
-  left: calc(var(--x) * 1%);
-  top: calc(var(--y) * 1%);
-  width: var(--eye-width);
-  height: auto;
-  aspect-ratio: 2;
-  transform: translate(-50%, -50%) rotate(var(--angle)) scale(var(--size));
-}
 .eye-color {
   clip-path: inset(0 var(--unfilled) 0 0);
-  transition: clip-path v-bind('eyeColorTime + "ms"') ease var(--upload-delay, 0ms);
+  transition: clip-path v-bind('eyeColorTime + "ms"') ease;
 }
-.eyes-hidden .small-eye { visibility: hidden; }
 .refilled .eye-color {
   clip-path: inset(0);
   transition-delay: var(--refill-delay);
@@ -744,20 +614,6 @@ onBeforeUnmount(() => {
 .refill-eyes:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .refill-eyes:disabled { cursor: default; opacity: 0.65; }
 
-/* Before the intro every eye sits on the main eye. It is moved there with a
-   transform (not left/top), so scattering 2,000 eyes needs no layout work. */
-.waiting .small-eye {
-  opacity: 0;
-  transform: translate(
-      calc(-50% + (var(--origin-x) - var(--x)) * var(--field-w) * 0.01px),
-      calc(-50% + (var(--origin-y) - var(--y)) * var(--field-h) * 0.01px)
-    ) rotate(0deg) scale(0.1);
-}
-.scattering .small-eye {
-  transition: transform 1550ms var(--delay) cubic-bezier(0.19, 0.75, 0.28, 1),
-    opacity 260ms var(--delay) ease-out;
-}
-
 /* A soft orange wave that leaves the main eye with the colour of a saved document. */
 .feed-ripple {
   position: absolute;
@@ -775,7 +631,7 @@ onBeforeUnmount(() => {
 }
 
 .eye-field.swallowing { z-index: 2; }
-.swallowing :is(.small-eye, .border-eye) {
+.swallowing .border-eye {
   animation: pull-into-eye var(--pull-duration) var(--pull-delay) ease-in both;
 }
 
@@ -851,7 +707,7 @@ progress {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .eye-color, .refilled .eye-color, .scattering .small-eye { transition: none; }
+  .eye-color, .refilled .eye-color { transition: none; }
   .replay-intro, .feed-ripple { display: none; }
 }
 </style>

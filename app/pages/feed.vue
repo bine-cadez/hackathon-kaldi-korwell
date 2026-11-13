@@ -22,7 +22,12 @@ const feedEye = ref<HTMLElement | null>(null)
 const uploadForm = ref<HTMLFormElement | null>(null)
 const eyeTravel = ref<{ x: number, y: number, scale: number, returning: boolean, duration: number } | null>(null)
 const eyeBlackHole = ref(false)
-const formHidden = computed(() => eyeTravel.value !== null && !eyeTravel.value.returning)
+// The heading and the form fade out while the eye flies to the centre and
+// swallows the small eyes, and stay hidden until the Wolt disc has landed
+// (PanemRewards clears eyeTravel then). They fade out over the eye's flight
+// and come back over 900ms.
+const formHidden = computed(() => eyeTravel.value !== null)
+const fadeStyle = computed(() => ({ transitionDuration: (formHidden.value ? eyeTravel.value!.duration : 900) + 'ms' }))
 const eyeMotionStyle = computed(() => {
   const travel = eyeTravel.value
   if (!travel) return undefined
@@ -285,16 +290,20 @@ async function saveDocument () {
           :style="eyeMotionStyle"
           :black-hole="eyeBlackHole"
         />
-        <div class="mx-auto w-fit rounded-[2rem] bg-paper/92 px-6 py-3 backdrop-blur-sm">
+        <div
+          class="mx-auto w-fit rounded-[2rem] bg-paper/92 px-6 py-3 backdrop-blur-sm transition-opacity ease-in-out motion-reduce:transition-none"
+          :class="{ 'opacity-0': formHidden }"
+          :style="fadeStyle"
+        >
           <h1 class="text-[clamp(2.2rem,5vw,2.9rem)] leading-tight font-light">Add a document</h1>
           <p class="mx-auto mt-2 max-w-md text-lg text-muted">Once it’s saved, anyone can ask Korwell about it.</p>
         </div>
       </div>
       <form
         ref="uploadForm"
-        class="mt-8 grid gap-5 rounded-[2rem] bg-paper/92 p-[clamp(1rem,4vw,2rem)] shadow-[0_0_0_1px_rgb(89_61_20/0.08),0_24px_60px_-30px_rgb(89_61_20/0.35)] backdrop-blur-sm transition-opacity duration-[1100ms] ease-in-out motion-reduce:transition-none"
+        class="mt-8 grid gap-5 rounded-[2rem] bg-paper/92 p-[clamp(1rem,4vw,2rem)] shadow-[0_0_0_1px_rgb(89_61_20/0.08),0_24px_60px_-30px_rgb(89_61_20/0.35)] backdrop-blur-sm transition-opacity ease-in-out motion-reduce:transition-none"
         :class="{ 'opacity-0': formHidden }"
-        :style="eyeTravel ? { transitionDuration: eyeTravel.duration + 'ms' } : undefined"
+        :style="fadeStyle"
         :inert="formHidden"
         @submit.prevent="saveDocument"
       >

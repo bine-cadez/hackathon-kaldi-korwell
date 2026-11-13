@@ -1,4 +1,5 @@
 import type { DocDatabase } from './env.ts'
+import { isMissingSchemaError } from './capabilities.ts'
 import type { SlackLink } from './slack-text.ts'
 
 const PATCH_COLUMNS = new Set([
@@ -96,11 +97,6 @@ export interface StoredMessage {
 }
 
 type Patch = Record<string, string | number | null>
-
-export function isMissingSchemaError (error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error)
-  return /no such (table|column)|no such module:\s*fts5/i.test(message)
-}
 
 export async function slackArchiveReady (db: Pick<DocDatabase, 'prepare'>): Promise<boolean> {
   try {

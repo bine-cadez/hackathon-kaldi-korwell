@@ -7,7 +7,7 @@
     "dev": "nuxt dev",
     "preview": "wrangler --cwd .output dev",
     "postinstall": "nuxt prepare",
-    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "test": "node --experimental-strip-types --import ./tests/register.mjs --test tests/*.test.ts",
     "deploy": "nuxt build && wrangler --cwd .output deploy",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",

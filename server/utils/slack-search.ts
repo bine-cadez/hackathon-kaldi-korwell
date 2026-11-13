@@ -1,7 +1,7 @@
 import { createError } from 'h3'
 import type { DocDatabase } from './env.ts'
+import { isMissingSchemaError } from './capabilities.ts'
 import {
-  isMissingSchemaError,
   reactionsFor,
   slackArchiveReady,
   type ReactionView,

@@ -1,16 +1,20 @@
+import { createError } from 'h3'
+import { readSearchCapabilities } from './capabilities'
 import { chunkText, ChunkLimitError } from './chunk'
 import { embedTexts } from './embeddings'
 import { ensureSchema } from './schema'
-import { rankByCosine, useLocalVectors } from './vectors'
+import { useLocalVectors } from './vectors'
 import type { DocLibraryEnv } from './env'
 
 const TITLE_MAX = 200
+const AUTHOR_MAX = 200
 const BODY_MAX = 200_000
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 interface DocumentListRow {
   id: string
   title: string
+  author: string | null
   created_at: string
   r2_key: string | null
   chunk_count: number
@@ -19,6 +23,7 @@ interface DocumentListRow {
 interface DocumentRow {
   id: string
   title: string
+  author: string | null
   body: string
   r2_key: string | null
   created_at: string
@@ -41,10 +46,20 @@ export function assertDocumentId (id: string | undefined): string {
   return id
 }
 
-export async function saveDocument (env: DocLibraryEnv, apiKey: string, input: { title: string, body: string }) {
+function normalizeAuthor (value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const author = value.trim().replace(/\s+/g, ' ')
+  if (!author) return null
+  if (author.length > AUTHOR_MAX) badRequest(`Author must be ${AUTHOR_MAX} characters or fewer`)
+  return author
+}
+
+export async function saveDocument (env: DocLibraryEnv, apiKey: string, input: { title: string, body: string, author?: unknown }) {
   await ensureSchema(env.DB)
+  const caps = await readSearchCapabilities(env.DB)
 
   const title = input.title.trim().replace(/\s+/g, ' ')
+  const author = normalizeAuthor(input.author)
   const body = input.body.replace(/\r\n/g, '\n').trim()
   if (!title) badRequest('Title is required')
   if (title.length > TITLE_MAX) badRequest(`Title must be ${TITLE_MAX} characters or fewer`)
@@ -85,11 +100,14 @@ export async function saveDocument (env: DocLibraryEnv, apiKey: string, input: {
   ))
 
   try {
-    await env.DB.batch([
-      env.DB.prepare(
+    const insert = caps.author
+      ? env.DB.prepare(
+        'INSERT INTO documents (id, title, body, author, r2_key, created_at) VALUES (?, ?, ?, ?, NULL, ?)'
+      ).bind(documentId, title, body, author, createdAt)
+      : env.DB.prepare(
         'INSERT INTO documents (id, title, body, r2_key, created_at) VALUES (?, ?, ?, NULL, ?)'
       ).bind(documentId, title, body, createdAt)
-    ])
+    await env.DB.batch([insert])
     for (let offset = 0; offset < chunkInserts.length; offset += 4) {
       await env.DB.batch(chunkInserts.slice(offset, offset + 4))
     }
@@ -143,10 +161,11 @@ export async function saveDocument (env: DocLibraryEnv, apiKey: string, input: {
     }
   }
 
-  console.log(JSON.stringify({ message: 'document_saved', documentId, chunkCount: rows.length, r2: Boolean(r2Key), vectorize }))
+  console.log(JSON.stringify({ message: 'document_saved', documentId, chunkCount: rows.length, r2: Boolean(r2Key), vectorize, hasAuthor: Boolean(author && caps.author) }))
   return {
     id: documentId,
     title,
+    author: caps.author ? author : null,
     chunkCount: rows.length,
     r2Key,
     createdAt,
@@ -156,11 +175,14 @@ export async function saveDocument (env: DocLibraryEnv, apiKey: string, input: {
 
 export async function listDocuments (env: DocLibraryEnv) {
   await ensureSchema(env.DB)
+  const caps = await readSearchCapabilities(env.DB)
+  const authorSelect = caps.author ? 'd.author' : 'NULL'
+  const authorGroup = caps.author ? 'd.author, ' : ''
   const { results } = await env.DB.prepare(`
-    SELECT d.id, d.title, d.created_at, d.r2_key, COUNT(c.id) AS chunk_count
+    SELECT d.id, d.title, ${authorSelect} AS author, d.created_at, d.r2_key, COUNT(c.id) AS chunk_count
     FROM documents d
     LEFT JOIN chunks c ON c.document_id = d.id
-    GROUP BY d.id, d.title, d.created_at, d.r2_key
+    GROUP BY d.id, d.title, ${authorGroup}d.created_at, d.r2_key
     ORDER BY d.created_at DESC
     LIMIT 100
   `).all<DocumentListRow>()
@@ -168,6 +190,7 @@ export async function listDocuments (env: DocLibraryEnv) {
   return results.map(row => ({
     id: row.id,
     title: row.title,
+    author: row.author ?? null,
     createdAt: row.created_at,
     r2Key: row.r2_key,
     chunkCount: Number(row.chunk_count)
@@ -176,8 +199,10 @@ export async function listDocuments (env: DocLibraryEnv) {
 
 export async function getDocument (env: DocLibraryEnv, id: string) {
   await ensureSchema(env.DB)
+  const caps = await readSearchCapabilities(env.DB)
+  const authorSelect = caps.author ? 'author' : 'NULL'
   const document = await env.DB.prepare(
-    'SELECT id, title, body, r2_key, created_at FROM documents WHERE id = ?'
+    `SELECT id, title, ${authorSelect} AS author, body, r2_key, created_at FROM documents WHERE id = ?`
   ).bind(id).first<DocumentRow>()
   if (!document) {
     throw createError({ statusCode: 404, statusMessage: 'Document not found', data: { message: 'Document not found' } })
@@ -189,6 +214,7 @@ export async function getDocument (env: DocLibraryEnv, id: string) {
   return {
     id: document.id,
     title: document.title,
+    author: document.author ?? null,
     body: document.body,
     r2Key: document.r2_key,
     createdAt: document.created_at,
@@ -236,92 +262,4 @@ export async function deleteDocument (env: DocLibraryEnv, id: string) {
   }
   console.log(JSON.stringify({ message: 'document_deleted', documentId: id, chunkCount: chunkIds.length }))
   return { id, deleted: true }
-}
-
-export async function searchDocuments (env: DocLibraryEnv, apiKey: string, query: string, topK: number) {
-  await ensureSchema(env.DB)
-  const trimmed = query.trim()
-  if (!trimmed) badRequest('Query is required')
-  if (trimmed.length > 2000) badRequest('Query must be 2000 characters or fewer')
-
-  const [vector] = await embedTexts([trimmed], apiKey)
-  if (!vector) throw new Error('OpenRouter returned no query embedding')
-
-  if (!useLocalVectors()) {
-    try {
-      const result = await env.VECTORIZE.query(vector, { topK, returnMetadata: 'all' })
-      const matches = result.matches ?? []
-      if (matches.length > 0 || !import.meta.dev) {
-        const ordered = await hydrateVectorMatches(env, matches)
-        console.log(JSON.stringify({ message: 'search', backend: 'vectorize', queryChars: trimmed.length, matches: ordered.length }))
-        return { backend: 'vectorize' as const, matches: ordered }
-      }
-    } catch (error) {
-      if (!import.meta.dev) throw error
-      console.error(JSON.stringify({
-        message: 'vectorize_query_failed_dev',
-        error: error instanceof Error ? error.message : String(error)
-      }))
-    }
-  }
-
-  const local = await searchLocalEmbeddings(env, vector, topK)
-  console.log(JSON.stringify({ message: 'search', backend: 'd1', queryChars: trimmed.length, matches: local.length }))
-  return { backend: 'd1' as const, matches: local }
-}
-
-async function hydrateVectorMatches (env: DocLibraryEnv, matches: Array<{ id: string, score: number, metadata?: Record<string, unknown> }>) {
-  if (matches.length === 0) return []
-  const ids = matches.map(match => match.id)
-  const placeholders = ids.map(() => '?').join(', ')
-  const { results } = await env.DB.prepare(`
-    SELECT c.id, c.content, c.chunk_index, d.id AS document_id, d.title
-    FROM chunks c
-    JOIN documents d ON d.id = c.document_id
-    WHERE c.id IN (${placeholders})
-  `).bind(...ids).all<ChunkRow & { document_id: string, title: string }>()
-
-  const byId = new Map(results.map(row => [row.id, row]))
-  return matches.map((match) => {
-    const row = byId.get(match.id)
-    const metadata = match.metadata ?? {}
-    return {
-      chunkId: match.id,
-      documentId: row?.document_id || String(metadata.documentId || ''),
-      title: row?.title || String(metadata.title || 'Untitled'),
-      chunkIndex: row?.chunk_index ?? Number(metadata.chunkIndex ?? 0),
-      content: row?.content || '',
-      score: match.score
-    }
-  })
-}
-
-async function searchLocalEmbeddings (env: DocLibraryEnv, vector: number[], topK: number) {
-  const { results } = await env.DB.prepare(`
-    SELECT c.id, c.content, c.chunk_index, c.embedding, d.id AS document_id, d.title
-    FROM chunks c
-    JOIN documents d ON d.id = c.document_id
-    WHERE c.embedding IS NOT NULL
-    LIMIT 1000
-  `).all<ChunkRow & { document_id: string, title: string, embedding: string | null }>()
-
-  const parsed = results.flatMap((row) => {
-    if (!row.embedding) return []
-    try {
-      const embedding = JSON.parse(row.embedding) as unknown
-      if (!Array.isArray(embedding) || embedding.length !== vector.length) return []
-      return [{
-        chunkId: row.id,
-        documentId: row.document_id,
-        title: row.title,
-        chunkIndex: row.chunk_index,
-        content: row.content,
-        embedding: embedding as number[]
-      }]
-    } catch {
-      return []
-    }
-  })
-
-  return rankByCosine(parsed, vector, topK).map(({ embedding: _embedding, ...match }) => match)
 }

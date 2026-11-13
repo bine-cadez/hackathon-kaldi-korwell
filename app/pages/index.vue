@@ -116,6 +116,10 @@ const searchParams = computed((): SearchParams => ({
 const searched = computed(() => Boolean(searchParams.value.q || searchParams.value.title || searchParams.value.author))
 
 const corpus = ref<'documents' | 'slack'>('documents')
+const corpusTabs = [
+  { label: 'Documents', value: 'documents' },
+  { label: 'Slack', value: 'slack' }
+]
 // Form fields: edited freely, applied to the URL on submit.
 const query = ref(searchParams.value.q)
 const fromDate = ref(searchParams.value.from)
@@ -131,7 +135,8 @@ watch(searchParams, (params) => {
   authorFilter.value = params.author
 })
 const archiveEye = ref<{ lookAt: (x: number, y: number) => void } | null>(null)
-const queryInput = ref<HTMLInputElement | null>(null)
+const queryField = ref<{ inputRef: HTMLInputElement | null } | null>(null)
+const queryInput = computed(() => queryField.value?.inputRef ?? null)
 const queryInvalid = ref(false)
 
 function previewMatches (): SearchMatch[] {
@@ -231,55 +236,68 @@ function runSearch () {
 </script>
 
 <template>
-  <main class="search-page">
-    <section class="search-hero" aria-labelledby="korwell-title">
+  <main class="mx-auto w-[min(46rem,calc(100%-2rem))] pt-10 pb-4">
+    <section class="text-center" aria-labelledby="korwell-title">
       <ArchiveEye ref="archiveEye" :searching="searching" :no-results="corpus === 'documents' && searched && !searching && !searchError && !matches.length" />
-      <p class="eyebrow archive-quote"><q v-if="archiveQuote">{{ archiveQuote }}</q></p>
-      <h1 id="korwell-title">Korwell</h1>
-      <div class="corpus-tabs" role="tablist" aria-label="What to search">
-        <button type="button" role="tab" :aria-selected="corpus === 'documents'" @click="corpus = 'documents'">Documents</button>
-        <button type="button" role="tab" :aria-selected="corpus === 'slack'" @click="corpus = 'slack'">Slack</button>
-      </div>
+      <p class="eyebrow mx-auto mt-3 mb-4 min-h-[1.5em] leading-normal text-muted"><q v-if="archiveQuote">{{ archiveQuote }}</q></p>
+      <h1 id="korwell-title" class="mb-5 text-[clamp(4rem,13vw,7.5rem)] leading-none text-primary">Korwell</h1>
+      <UTabs
+        v-model="corpus"
+        :items="corpusTabs"
+        :content="false"
+        aria-label="What to search"
+        class="mx-auto mb-4 w-fit"
+        :ui="{ list: 'rounded-full bg-default ring ring-default', indicator: 'rounded-full bg-primary', trigger: 'rounded-full px-4 font-bold data-[state=active]:text-paper data-[state=inactive]:text-primary' }"
+      />
       <SlackSearch v-if="corpus === 'slack'" />
-      <form v-else class="search-form" role="search" novalidate @submit.prevent="runSearch">
-        <div class="search-bar">
-          <label class="sr-only" for="archive-query">Search the records</label>
-          <input id="archive-query" ref="queryInput" v-model="query" :aria-invalid="queryInvalid || undefined" :aria-describedby="queryInvalid ? 'archive-query-error' : undefined" @input="queryInvalid = false; followCaret()" @focus="followCaret" @click="followCaret" @keyup="followCaret" type="text" inputmode="search" enterkeyhint="search" name="q" placeholder="Search the records…">
-          <button v-if="query" class="clear-search" type="button" aria-label="Clear search" title="Clear search" @click="clearQuery">
-            <svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true">
-              <path d="m6 6 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
-            </svg>
-          </button>
-          <button class="search-submit" type="submit" :disabled="searching" :aria-label="searching ? 'Searching…' : 'Search'" title="Search">
-            <SearchIcon />
-          </button>
-        </div>
-        <div class="search-filters">
-          <label>
-            From
-            <input v-model="fromDate" type="date" name="from">
-          </label>
-          <label>
-            To
-            <input v-model="toDate" type="date" name="to">
-          </label>
-          <label>
-            Title
-            <input v-model="titleFilter" type="text" name="title" maxlength="200" placeholder="Words in the title">
-          </label>
-          <label>
-            Author
-            <input v-model="authorFilter" type="text" name="author" maxlength="200" placeholder="Words in the author">
-          </label>
-          <button v-if="fromDate || toDate || titleFilter || authorFilter" class="clear-filters" type="button" @click="clearFilters">Clear filters</button>
-        </div>
-        <p class="meta search-filter-note">Dates include the whole day, in UTC.</p>
+      <form v-else class="grid gap-3.5" role="search" novalidate @submit.prevent="runSearch">
+        <SearchBar
+          ref="queryField"
+          v-model="query"
+          input-id="archive-query"
+          label="Search the records"
+          placeholder="Search the records…"
+          :searching="searching"
+          :invalid="queryInvalid"
+          :described-by="queryInvalid ? 'archive-query-error' : undefined"
+          clearable
+          inputmode="search"
+          enterkeyhint="search"
+          @input="queryInvalid = false; followCaret()"
+          @focus="followCaret"
+          @click="followCaret"
+          @keyup="followCaret"
+          @clear="clearQuery"
+        />
+        <SearchFilters :active="!!(fromDate || toDate || titleFilter || authorFilter)" @clear="clearFilters">
+          <UFormField label="From">
+            <UInput v-model="fromDate" type="date" name="from" class="w-full" />
+          </UFormField>
+          <UFormField label="To">
+            <UInput v-model="toDate" type="date" name="to" class="w-full" />
+          </UFormField>
+          <UFormField label="Title">
+            <UInput v-model="titleFilter" name="title" maxlength="200" placeholder="Words in the title" class="w-full" />
+          </UFormField>
+          <UFormField label="Author">
+            <UInput v-model="authorFilter" name="author" maxlength="200" placeholder="Words in the author" class="w-full" />
+          </UFormField>
+        </SearchFilters>
+        <p class="m-0 text-start text-sm text-muted">Dates include the whole day, in UTC.</p>
       </form>
-      <p v-if="corpus === 'documents' && queryInvalid" id="archive-query-error" class="query-feedback" role="alert">Enter a search term, a title, or an author.</p>
-      <p v-if="preview" class="meta">Design preview · sample documents</p>
+      <UAlert
+        v-if="corpus === 'documents' && queryInvalid"
+        id="archive-query-error"
+        role="alert"
+        color="warning"
+        variant="subtle"
+        class="mt-3 text-start"
+        title="Enter a search term, a title, or an author."
+      />
+      <p v-if="preview" class="text-sm text-muted">Design preview · sample documents</p>
     </section>
 
-    <section v-if="corpus === 'documents' && searched" class="search-results" aria-label="Search results" :aria-busy="searching">
+    <section v-if="corpus === 'documents' && searched" class="mt-8 border-t-3 border-double border-default pt-4" aria-label="Search results" :aria-busy="searching">
       <template v-if="searching">
         <p role="status" class="sr-only">Searching the archive…</p>
         <ResultSkeleton />
@@ -287,20 +305,26 @@ function runSearch () {
       <ErrorState v-else-if="searchError" :error="searchError" title="Search didn’t finish" @retry="refetchSearch()" />
       <p v-else-if="!matches.length" role="status">No matching passages found. Try a different search.</p>
       <template v-else>
-        <h2>{{ preview ? `${matches.length} sample results` : 'From the archive' }}</h2>
-        <ol class="results">
-          <li v-for="match in matches" :key="match.chunkId" class="result">
-            <h3>
-              <NuxtLink v-if="match.documentId" :to="documentPath(match.documentId)">{{ match.title || 'Untitled' }}</NuxtLink>
+        <h2 class="text-2xl">{{ preview ? `${matches.length} sample results` : 'From the archive' }}</h2>
+        <ol class="mt-3 grid gap-2">
+          <li v-for="match in matches" :key="match.chunkId" class="rounded-xl border border-default bg-default p-3">
+            <h3 class="text-lg">
+              <NuxtLink v-if="match.documentId" class="text-primary hover:underline hover:underline-offset-[0.2em]" :to="documentPath(match.documentId)">{{ match.title || 'Untitled' }}</NuxtLink>
               <template v-else>{{ match.title || 'Untitled' }}</template>
             </h3>
-            <p v-if="match.author || match.createdAt" class="meta">
+            <p v-if="match.author || match.createdAt" class="mt-0.5 text-sm text-muted">
               <span v-if="match.author">{{ match.author }}</span><span v-if="match.author && match.createdAt"> · </span><span v-if="match.createdAt">{{ match.createdAt.slice(0, 10) }}</span>
             </p>
-            <p class="chunk">{{ match.content || 'Passage unavailable.' }}</p>
-            <p v-if="match.documentId" class="result-actions">
-              <NuxtLink class="button-link" :to="documentPath(match.documentId)" :aria-label="`Open ${match.title || 'document'}`">Open document</NuxtLink>
-            </p>
+            <p class="mt-2 leading-normal break-words whitespace-pre-wrap">{{ match.content || 'Passage unavailable.' }}</p>
+            <UButton
+              v-if="match.documentId"
+              class="mt-2"
+              color="neutral"
+              variant="outline"
+              label="Open document"
+              :to="documentPath(match.documentId)"
+              :aria-label="`Open ${match.title || 'document'}`"
+            />
           </li>
         </ol>
       </template>

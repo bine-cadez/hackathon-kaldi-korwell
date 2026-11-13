@@ -25,60 +25,54 @@ async function copy (value: string) {
 </script>
 
 <template>
-  <main class="archive-page">
-    <ArchiveEye />
-    <p class="eyebrow">Connectors</p>
-    <h1>Connect Claude</h1>
-    <p class="lede">
+  <main class="mx-auto w-[min(46rem,calc(100%-2rem))] pt-10 pb-16">
+    <ArchiveEye class="mx-0 w-32" />
+    <PageHeading eyebrow="Connectors" title="Connect Claude">
       Let Claude search the library and the Slack archive. Read-only: Claude can search and read
       documents, never add or delete them.
-    </p>
+    </PageHeading>
 
-    <section class="card">
-      <h2>Server URL</h2>
-      <div class="copy-field">
-        <code>{{ mcpUrl }}</code>
-        <button class="ghost" type="button" @click="copy(mcpUrl)">
-          {{ copied === mcpUrl ? 'Copied' : 'Copy' }}
-        </button>
-      </div>
-      <p v-if="healthError" class="err">Could not check the connector status.</p>
-      <p v-else-if="health && !health.mcp" class="err">
-        The connector is turned off on this server (<code>MCP_SIGNING_KEY</code> is not set).
-        Ask an admin before connecting.
-      </p>
-      <p v-else-if="health" class="ok">The connector is on.</p>
-    </section>
+    <div class="grid gap-4">
+      <UCard as="section">
+        <h2 class="text-xl">Server URL</h2>
+        <CopyField :value="mcpUrl" :copied="copied === mcpUrl" @copy="copy(mcpUrl)" />
+        <p v-if="healthError" class="mt-3 text-error">Could not check the connector status.</p>
+        <UAlert v-else-if="health && !health.mcp" class="mt-3" color="error" variant="subtle" icon="i-lucide-plug-zap">
+          <template #description>
+            The connector is turned off on this server (<code>MCP_SIGNING_KEY</code> is not set).
+            Ask an admin before connecting.
+          </template>
+        </UAlert>
+        <p v-else-if="health" class="mt-3 flex items-center gap-1.5 text-success">
+          <UIcon name="i-lucide-circle-check" class="size-4" /> The connector is on.
+        </p>
+      </UCard>
 
-    <section class="card">
-      <h2>Claude Team or Enterprise</h2>
-      <p class="meta">An organization Owner adds the connector once:</p>
-      <ol class="steps">
-        <li>Open <strong>Admin settings → Connectors</strong> and choose <strong>Add custom connector</strong>.</li>
-        <li>Name it <strong>Korwell</strong> and paste the server URL above.</li>
-        <li>Leave the OAuth client ID and secret empty. Claude registers itself.</li>
-      </ol>
-      <p class="meta">Then everyone connects with their own work email:</p>
-      <ol class="steps">
-        <li>Open <strong>Settings → Connectors</strong>, find <strong>Korwell</strong>, and choose <strong>Connect</strong>.</li>
-        <li>Sign in with your Kaldi email if asked, then choose <strong>Allow read access</strong>.</li>
-        <li>In a chat, ask Claude to search the Kaldi Archive.</li>
-      </ol>
-      <p class="note">
-        Each connection belongs to the person who approved it and lasts up to 30 days. After that,
-        Claude asks you to approve it again.
-      </p>
-    </section>
+      <UCard as="section">
+        <h2 class="text-xl">Claude Team or Enterprise</h2>
+        <p class="mt-2 text-sm text-muted">An organization Owner adds the connector once:</p>
+        <ol class="mt-1.5 mb-4 grid list-decimal gap-1.5 pl-5">
+          <li>Open <strong>Admin settings → Connectors</strong> and choose <strong>Add custom connector</strong>.</li>
+          <li>Name it <strong>Korwell</strong> and paste the server URL above.</li>
+          <li>Leave the OAuth client ID and secret empty. Claude registers itself.</li>
+        </ol>
+        <p class="text-sm text-muted">Then everyone connects with their own work email:</p>
+        <ol class="mt-1.5 mb-4 grid list-decimal gap-1.5 pl-5">
+          <li>Open <strong>Settings → Connectors</strong>, find <strong>Korwell</strong>, and choose <strong>Connect</strong>.</li>
+          <li>Sign in with your Kaldi email if asked, then choose <strong>Allow read access</strong>.</li>
+          <li>In a chat, ask Claude to search the Kaldi Archive.</li>
+        </ol>
+        <p class="text-muted">
+          Each connection belongs to the person who approved it and lasts up to 30 days. After that,
+          Claude asks you to approve it again.
+        </p>
+      </UCard>
 
-    <section class="card">
-      <h2>Claude Code</h2>
-      <div class="copy-field">
-        <code>{{ claudeCodeCommand }}</code>
-        <button class="ghost" type="button" @click="copy(claudeCodeCommand)">
-          {{ copied === claudeCodeCommand ? 'Copied' : 'Copy' }}
-        </button>
-      </div>
-      <p class="note">Run <code>/mcp</code> in Claude Code to sign in. The approval page opens in your browser.</p>
-    </section>
+      <UCard as="section">
+        <h2 class="text-xl">Claude Code</h2>
+        <CopyField :value="claudeCodeCommand" :copied="copied === claudeCodeCommand" @copy="copy(claudeCodeCommand)" />
+        <p class="mt-3 text-muted">Run <code>/mcp</code> in Claude Code to sign in. The approval page opens in your browser.</p>
+      </UCard>
+    </div>
   </main>
 </template>

@@ -67,7 +67,7 @@ const canRefill = computed(() => intro.value === 'done' && !props.saving && !end
   (!props.rewardsEnabled || !preview.value))
 const voucherReference = ref('')
 const voucherUrl = computed(() => '/api/demo/panem/' + (preview.value?.voucher ?? voucherReference.value) + '.svg')
-const fillButton = ref<HTMLButtonElement | null>(null)
+const fillButton = ref<{ $el: HTMLElement } | null>(null)
 const refillButton = ref<HTMLButtonElement | null>(null)
 const woltTarget = ref<HTMLElement | null>(null)
 const woltButton = ref<HTMLButtonElement | null>(null)
@@ -498,7 +498,7 @@ async function startNextRound () {
   phase.value = words.value >= demoGoal ? 'wolt' : 'collecting'
   saveProgress()
   await nextTick()
-  fillButton.value?.focus()
+  fillButton.value?.$el.focus()
 }
 
 onBeforeUnmount(() => {
@@ -599,13 +599,9 @@ onBeforeUnmount(() => {
           </div>
           <progress :value="words" :max="demoGoal" aria-label="Words toward lunch" />
           <div v-if="demo" class="progress-actions">
-            <button ref="fillButton" type="button" class="primary" :disabled="saving || phase !== 'collecting' || intro !== 'done'" @click="fillEyes">
-              Fill the eyes
-            </button>
+            <UButton ref="fillButton" size="sm" label="Fill the eyes" :disabled="saving || phase !== 'collecting' || intro !== 'done'" @click="fillEyes" />
             <span>{{ clicks }} of {{ roundLength }} demo clicks</span>
-            <button type="button" class="ghost replay-intro" :disabled="saving || phase !== 'collecting' || intro !== 'done'" @click="replayIntro">
-              Replay intro
-            </button>
+            <UButton class="replay-intro" size="sm" color="neutral" variant="outline" label="Replay intro" :disabled="saving || phase !== 'collecting' || intro !== 'done'" @click="replayIntro" />
           </div>
           <p class="sr-only" role="status">
             {{ lastAdded ? '+' + format.format(lastAdded) + (demo ? ' demo words' : ' words from your document') : '' }}
@@ -635,8 +631,8 @@ onBeforeUnmount(() => {
             >
             <span>Download sample coupon</span>
           </a>
-          <button v-if="preview && rewardsEnabled" type="button" class="ghost" @click="finishPreview">Back to progress</button>
-          <button v-else-if="!preview" type="button" class="ghost" @click="startNextRound">Start another round</button>
+          <UButton v-if="preview && rewardsEnabled" color="neutral" variant="outline" label="Back to progress" @click="finishPreview" />
+          <UButton v-else-if="!preview" color="neutral" variant="outline" label="Start another round" @click="startNextRound" />
         </div>
 
       </div>
@@ -781,7 +777,6 @@ progress {
   accent-color: var(--accent);
 }
 .progress-actions { margin-top: 0.35rem; gap: 0.3rem 0.6rem; }
-.progress-actions button { padding: 0.25rem 0.65rem; }
 .is-swallowing { background: transparent; border-color: transparent; visibility: hidden; }
 .wolt-reveal {
   display: flex;

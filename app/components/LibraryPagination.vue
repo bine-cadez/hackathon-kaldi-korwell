@@ -11,28 +11,35 @@ const props = defineProps<{
 }>()
 
 const items = computed(() => paginationItems(props.page, props.totalPages))
+
+// Pill links in the Kaldi style, matching Nuxt UI's outline buttons.
+const pill = 'inline-flex min-h-10 items-center justify-center rounded-full border tabular-nums focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary'
+const linkClass = 'border-default text-primary hover:border-primary'
+const pageClass = `${pill} min-w-10 px-3`
+const stepClass = `${pill} gap-1.5 px-3.5`
+const disabledClass = 'border-default text-muted opacity-50'
 </script>
 
 <template>
-  <nav v-if="totalPages > 1" class="pagination" aria-label="Library pages">
+  <nav v-if="totalPages > 1" class="mt-4 flex flex-wrap items-center justify-between gap-2" aria-label="Library pages">
     <NuxtLink
       v-if="page > 1"
-      class="pagination-step"
+      :class="[stepClass, linkClass]"
       :to="linkFor(page - 1)"
       rel="prev"
       aria-current="false"
     >
-      <span aria-hidden="true">←</span> Previous
+      <UIcon name="i-lucide-arrow-left" class="size-4" /> Previous
     </NuxtLink>
-    <span v-else class="pagination-step" aria-disabled="true"><span aria-hidden="true">←</span> Previous</span>
+    <span v-else :class="[stepClass, disabledClass]" aria-disabled="true"><UIcon name="i-lucide-arrow-left" class="size-4" /> Previous</span>
 
-    <ol class="pagination-pages">
+    <ol class="m-0 flex list-none flex-wrap justify-center gap-1.5 p-0">
       <li v-for="(item, index) in items" :key="item ?? `gap-${index}`">
-        <span v-if="item === null" class="pagination-gap" aria-hidden="true">…</span>
-        <span v-else-if="item === page" class="pagination-page" aria-current="page">
+        <span v-if="item === null" class="inline-grid min-h-10 min-w-6 place-items-center text-muted" aria-hidden="true">…</span>
+        <span v-else-if="item === page" :class="[pageClass, 'border-primary bg-primary font-bold text-inverted']" aria-current="page">
           <span class="sr-only">Page </span>{{ item }}
         </span>
-        <NuxtLink v-else class="pagination-page" :to="linkFor(item)" aria-current="false">
+        <NuxtLink v-else :class="[pageClass, linkClass]" :to="linkFor(item)" aria-current="false">
           <span class="sr-only">Page </span>{{ item }}
         </NuxtLink>
       </li>
@@ -40,13 +47,13 @@ const items = computed(() => paginationItems(props.page, props.totalPages))
 
     <NuxtLink
       v-if="page < totalPages"
-      class="pagination-step"
+      :class="[stepClass, linkClass]"
       :to="linkFor(page + 1)"
       rel="next"
       aria-current="false"
     >
-      Next <span aria-hidden="true">→</span>
+      Next <UIcon name="i-lucide-arrow-right" class="size-4" />
     </NuxtLink>
-    <span v-else class="pagination-step" aria-disabled="true">Next <span aria-hidden="true">→</span></span>
+    <span v-else :class="[stepClass, disabledClass]" aria-disabled="true">Next <UIcon name="i-lucide-arrow-right" class="size-4" /></span>
   </nav>
 </template>

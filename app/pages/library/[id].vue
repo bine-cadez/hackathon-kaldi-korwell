@@ -64,35 +64,43 @@ async function removeDocument ({ confirmFirst = true } = {}) {
 </script>
 
 <template>
-  <main class="archive-page doc-page">
-    <NuxtLink class="back-link" to="/library" @click="goBack">
-      <span aria-hidden="true">←</span> {{ back.label }}
+  <main class="mx-auto w-[min(46rem,calc(100%-2rem))] pt-10 pb-16">
+    <!-- A plain link, so goBack can use history and modified clicks open a new tab. -->
+    <NuxtLink
+      class="mb-4 inline-flex items-center gap-1.5 text-sm text-primary hover:underline hover:underline-offset-[0.2em] focus-visible:rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      to="/library"
+      @click="goBack"
+    >
+      <UIcon name="i-lucide-arrow-left" class="size-4" /> {{ back.label }}
     </NuxtLink>
 
     <template v-if="error && !document">
-      <h1>{{ summary?.title ?? 'Document' }}</h1>
-      <section class="card">
+      <h1 class="text-4xl leading-tight [overflow-wrap:anywhere]">{{ summary?.title ?? 'Document' }}</h1>
+      <UCard as="section" class="mt-5">
         <ErrorState
           :error="error"
           title="Couldn’t open this document"
           :retrying="asyncStatus === 'loading'"
           @retry="refetch()"
         />
-        <p class="row doc-error-actions">
-          <NuxtLink class="button-link" to="/library">Browse the Library</NuxtLink>
-        </p>
-      </section>
+        <UButton class="mt-3" color="neutral" variant="outline" icon="i-lucide-library" label="Browse the Library" to="/library" />
+      </UCard>
     </template>
 
     <template v-else-if="document">
-      <div class="doc-page-header">
-        <div>
+      <div class="flex flex-col items-start justify-between gap-4 sm:flex-row">
+        <div class="min-w-0">
           <p class="eyebrow">Document</p>
-          <h1>{{ document.title }}</h1>
+          <h1 class="mt-1 text-4xl leading-tight [overflow-wrap:anywhere]">{{ document.title }}</h1>
         </div>
-        <button class="danger" type="button" :disabled="deleting" @click="removeDocument()">
-          {{ deleting ? 'Deleting…' : 'Delete' }}
-        </button>
+        <UButton
+          color="error"
+          variant="outline"
+          icon="i-lucide-trash-2"
+          :loading="deleting"
+          :label="deleting ? 'Deleting…' : 'Delete'"
+          @click="removeDocument()"
+        />
       </div>
       <ErrorState
         v-if="deleteError"
@@ -104,8 +112,8 @@ async function removeDocument ({ confirmFirst = true } = {}) {
         @dismiss="dismissDeleteError()"
       />
 
-      <section class="card doc-details" aria-label="Details">
-        <dl class="doc-facts">
+      <UCard as="section" class="mt-5" aria-label="Details">
+        <dl class="m-0 grid grid-cols-[max-content_1fr] gap-x-5 gap-y-1.5 text-sm [&_dd]:m-0 [&_dd]:[overflow-wrap:anywhere] [&_dt]:text-muted">
           <template v-if="document.author">
             <dt>Author</dt>
             <dd>{{ document.author }}</dd>
@@ -119,27 +127,27 @@ async function removeDocument ({ confirmFirst = true } = {}) {
           <template v-if="document.source">
             <dt>Original</dt>
             <dd>
-              <a class="doc-file" :href="document.source.url" download>{{ document.source.filename }}</a>
-              <span v-if="document.source.size !== null" class="meta"> · {{ formatFileSize(document.source.size) }}</span>
+              <a class="text-primary underline underline-offset-[0.2em] [font-variant-ligatures:none]" :href="document.source.url" download>{{ document.source.filename }}</a>
+              <span v-if="document.source.size !== null" class="text-muted"> · {{ formatFileSize(document.source.size) }}</span>
             </dd>
           </template>
         </dl>
-      </section>
+      </UCard>
 
-      <article class="card doc-body" aria-label="Document text">
-        <pre class="body">{{ document.body }}</pre>
-      </article>
+      <UCard as="article" class="mt-4" aria-label="Document text">
+        <pre class="m-0 font-sans leading-normal break-words whitespace-pre-wrap">{{ document.body }}</pre>
+      </UCard>
     </template>
 
     <template v-else-if="isPending">
       <p class="eyebrow">Document</p>
-      <h1 v-if="summary">{{ summary.title }}</h1>
-      <span v-else class="skeleton skeleton-heading" aria-hidden="true" />
-      <p v-if="summary?.author" class="meta">{{ summary.author }}</p>
-      <article class="card doc-body" aria-busy="true">
+      <h1 v-if="summary" class="mt-1 text-4xl leading-tight [overflow-wrap:anywhere]">{{ summary.title }}</h1>
+      <USkeleton v-else class="mt-2 mb-5 h-9 w-3/5 rounded-full bg-accented" aria-hidden="true" />
+      <p v-if="summary?.author" class="mt-1 text-sm text-muted">{{ summary.author }}</p>
+      <UCard as="article" class="mt-4" aria-busy="true">
         <p role="status" class="sr-only">Opening {{ summary?.title ?? 'document' }}…</p>
         <DocBodySkeleton />
-      </article>
+      </UCard>
     </template>
   </main>
 </template>

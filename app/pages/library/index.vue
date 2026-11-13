@@ -94,6 +94,22 @@ function withCurrent (list: FacetValue[] | undefined, current: string): FacetVal
 const authorOptions = computed(() => withCurrent(facets.value?.authors, filters.value.author))
 const uploaderOptions = computed(() => withCurrent(facets.value?.uploaders, filters.value.uploadedBy))
 
+// Nuxt UI selects cannot use '' as an item value, so "any" stands for no filter.
+const ANY = '__any__'
+const facetItems = (anyLabel: string, values: FacetValue[]) => [
+  { label: anyLabel, value: ANY },
+  ...values.map(value => ({ label: value.count ? `${value.name} (${value.count})` : value.name, value: value.name }))
+]
+const authorItems = computed(() => facetItems('Any author', authorOptions.value))
+const uploaderItems = computed(() => facetItems('Anyone', uploaderOptions.value))
+const fromAny = (value: unknown) => (value === ANY || typeof value !== 'string' ? '' : value)
+const sortItems = [
+  { label: 'Newest first', value: 'newest' },
+  { label: 'Oldest first', value: 'oldest' },
+  { label: 'Title A–Z', value: 'title' }
+]
+const pageSizeItems = LIBRARY_PAGE_SIZES.map((size): { label: string, value: number } => ({ label: String(size), value: size }))
+
 const rangeLabel = computed(() => {
   const page = listPage.value
   if (!page || page.total === 0 || !page.documents.length) return ''
@@ -137,137 +153,131 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
 </script>
 
 <template>
-  <main class="archive-page">
-    <ArchiveEye />
-    <p class="eyebrow">Company records</p>
-    <h1>Library</h1>
-    <section ref="listCard" class="card library-card" :aria-busy="loadingList">
-      <form class="library-toolbar" role="search" aria-label="Find documents" @submit.prevent="applySearch">
-        <div class="search-bar">
-          <label class="sr-only" for="library-query">Search by title, author, file name, or uploader</label>
-          <input
-            id="library-query"
+  <main class="mx-auto w-[min(46rem,calc(100%-2rem))] pt-10 pb-16">
+    <ArchiveEye class="mx-0 w-32" />
+    <PageHeading eyebrow="Company records" title="Library" />
+    <div ref="listCard" class="scroll-mt-4">
+      <UCard as="section" :aria-busy="loadingList">
+        <form class="grid gap-3" role="search" aria-label="Find documents" @submit.prevent="applySearch">
+          <SearchBar
             v-model="searchInput"
-            type="search"
-            name="q"
+            input-id="library-query"
+            label="Search by title, author, file name, or uploader"
+            placeholder="Search title, author, or file name…"
+            clearable
             maxlength="200"
             autocomplete="off"
             enterkeyhint="search"
-            placeholder="Search title, author, or file name…"
-          >
-          <button v-if="searchInput" class="clear-search" type="button" aria-label="Clear search" title="Clear search" @click="clearSearch">
-            <svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true">
-              <path d="m6 6 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" />
-            </svg>
-          </button>
-          <button class="search-submit" type="submit" aria-label="Search" title="Search">
-            <SearchIcon />
-          </button>
+            @clear="clearSearch"
+          />
+
+          <div class="grid gap-x-3 gap-y-2.5 sm:grid-cols-2 md:grid-cols-3 [&_label]:text-sm [&_label]:text-muted">
+            <UFormField label="Author">
+              <USelect
+                :model-value="filters.author || ANY"
+                :items="authorItems"
+                name="author"
+                class="w-full"
+                @update:model-value="updateFilters({ author: fromAny($event) })"
+              />
+            </UFormField>
+            <UFormField v-if="uploaderOptions.length" label="Uploaded by">
+              <USelect
+                :model-value="filters.uploadedBy || ANY"
+                :items="uploaderItems"
+                name="uploader"
+                class="w-full"
+                @update:model-value="updateFilters({ uploadedBy: fromAny($event) })"
+              />
+            </UFormField>
+            <UFormField label="Sort by">
+              <USelect
+                :model-value="filters.sort"
+                :items="sortItems"
+                name="sort"
+                class="w-full"
+                @update:model-value="updateFilters({ sort: $event as LibraryFilters['sort'] })"
+              />
+            </UFormField>
+            <UFormField label="Uploaded from">
+              <UInput type="date" name="from" class="w-full" :model-value="filters.from" :max="filters.to || undefined" @change="updateFilters({ from: inputValue($event) })" />
+            </UFormField>
+            <UFormField label="Uploaded to">
+              <UInput type="date" name="to" class="w-full" :model-value="filters.to" :min="filters.from || undefined" @change="updateFilters({ to: inputValue($event) })" />
+            </UFormField>
+          </div>
+          <p class="m-0 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm text-muted">
+            Matches words in the title, author, file name, or uploader, accents optional. Dates are in UTC.
+            <UButton v-if="filtersActive" class="px-0 underline underline-offset-[0.2em]" variant="link" size="sm" label="Clear search and filters" @click="clearFilters" />
+          </p>
+        </form>
+
+        <div class="mt-4 flex min-h-10 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-default pt-3">
+          <p role="status" aria-live="polite" class="m-0 text-sm text-muted tabular-nums">
+            <template v-if="!listPage && !listError">Loading documents…</template>
+            <template v-else-if="refreshing && isPlaceholderData">Updating results…</template>
+            <template v-else-if="refreshing">Checking for new documents…</template>
+            <template v-else>{{ rangeLabel }}</template>
+          </p>
+          <label v-if="listPage && listPage.total > LIBRARY_PAGE_SIZES[0]" class="flex items-center gap-2 text-sm text-muted">
+            Per page
+            <USelect
+              :model-value="filters.pageSize"
+              :items="pageSizeItems"
+              name="size"
+              size="sm"
+              @update:model-value="updateFilters({ pageSize: Number($event) })"
+            />
+          </label>
         </div>
 
-        <div class="library-filters">
-          <label>
-            Author
-            <select name="author" :value="filters.author" @change="updateFilters({ author: inputValue($event) })">
-              <option value="">Any author</option>
-              <option v-for="author in authorOptions" :key="author.name" :value="author.name">
-                {{ author.name }}{{ author.count ? ` (${author.count})` : '' }}
-              </option>
-            </select>
-          </label>
-          <label v-if="uploaderOptions.length">
-            Uploaded by
-            <select name="uploader" :value="filters.uploadedBy" @change="updateFilters({ uploadedBy: inputValue($event) })">
-              <option value="">Anyone</option>
-              <option v-for="uploader in uploaderOptions" :key="uploader.name" :value="uploader.name">
-                {{ uploader.name }}{{ uploader.count ? ` (${uploader.count})` : '' }}
-              </option>
-            </select>
-          </label>
-          <label>
-            Sort by
-            <select name="sort" :value="filters.sort" @change="updateFilters({ sort: inputValue($event) as LibraryFilters['sort'] })">
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-              <option value="title">Title A–Z</option>
-            </select>
-          </label>
-          <label>
-            Uploaded from
-            <input type="date" name="from" :value="filters.from" :max="filters.to || undefined" @change="updateFilters({ from: inputValue($event) })">
-          </label>
-          <label>
-            Uploaded to
-            <input type="date" name="to" :value="filters.to" :min="filters.from || undefined" @change="updateFilters({ to: inputValue($event) })">
-          </label>
-        </div>
-        <p class="meta search-filter-note">
-          Matches words in the title, author, file name, or uploader, accents optional. Dates are in UTC.
-          <button v-if="filtersActive" class="clear-filters" type="button" @click="clearFilters">Clear search and filters</button>
-        </p>
-      </form>
+        <ErrorState
+          v-if="listError"
+          :error="listError"
+          :title="listPage ? 'Couldn’t refresh the list' : 'Couldn’t load the library'"
+          :compact="!!listPage"
+          :retrying="loadingList"
+          @retry="retryList()"
+        />
 
-      <div class="library-summary">
-        <p role="status" aria-live="polite" class="note library-status">
-          <template v-if="!listPage && !listError">Loading documents…</template>
-          <template v-else-if="refreshing && isPlaceholderData">Updating results…</template>
-          <template v-else-if="refreshing">Checking for new documents…</template>
-          <template v-else>{{ rangeLabel }}</template>
-        </p>
-        <label v-if="listPage && listPage.total > LIBRARY_PAGE_SIZES[0]" class="page-size">
-          Per page
-          <select name="size" :value="filters.pageSize" @change="updateFilters({ pageSize: Number(inputValue($event)) })">
-            <option v-for="size in LIBRARY_PAGE_SIZES" :key="size" :value="size">{{ size }}</option>
-          </select>
-        </label>
-      </div>
-
-      <ErrorState
-        v-if="listError"
-        :error="listError"
-        :title="listPage ? 'Couldn’t refresh the list' : 'Couldn’t load the library'"
-        :compact="!!listPage"
-        :retrying="loadingList"
-        @retry="retryList()"
-      />
-
-      <DocListSkeleton v-if="!listPage && !listError" />
-      <div v-else-if="listPage && !listPage.total && filtersActive" class="empty-state">
-        <p class="note">No documents match these filters.</p>
-        <button class="ghost" type="button" @click="clearFilters">Clear search and filters</button>
-      </div>
-      <div v-else-if="listPage && !listPage.total" class="empty-state">
-        <p class="note">No documents yet.</p>
-        <NuxtLink class="ghost button-link" to="/feed">Add the first document</NuxtLink>
-      </div>
-      <template v-else-if="documents">
-        <ul class="doc-list" :class="{ 'is-stale': isPlaceholderData }">
-          <li v-for="document in documents" :key="document.id">
-            <div>
-              <NuxtLink class="doc-link" :to="documentPath(document.id)">{{ document.title }}</NuxtLink>
-              <p v-if="document.author" class="meta">{{ document.author }}</p>
-              <DocumentProvenance :created-at="document.createdAt" :uploaded-by="document.uploadedBy" :source="document.source" />
-            </div>
-            <button class="danger" type="button" :aria-label="`Delete ${document.title}`" @click="removeDocument(document.id)">Delete</button>
-          </li>
-        </ul>
-        <LibraryPagination :page="filters.page" :total-pages="listPage?.totalPages ?? 0" :link-for="pageLink" />
-      </template>
-      <ErrorState
-        v-if="deleteError && deleteId"
-        :error="deleteError"
-        :title="deleteTitle ? `Couldn’t delete “${deleteTitle}”` : 'Couldn’t delete the document'"
-        compact
-        :retrying="deleting"
-        @retry="removeDocument(deleteId, { confirmFirst: false })"
-        @dismiss="dismissDeleteError()"
-      />
-    </section>
-
+        <DocListSkeleton v-if="!listPage && !listError" />
+        <UEmpty
+          v-else-if="listPage && !listPage.total && filtersActive"
+          icon="i-lucide-search-x"
+          description="No documents match these filters."
+          :actions="[{ label: 'Clear search and filters', color: 'neutral', variant: 'outline', onClick: clearFilters }]"
+          variant="naked"
+        />
+        <UEmpty
+          v-else-if="listPage && !listPage.total"
+          icon="i-lucide-archive"
+          description="No documents yet."
+          :actions="[{ label: 'Add the first document', to: '/feed', icon: 'i-lucide-plus' }]"
+          variant="naked"
+        />
+        <template v-else-if="documents">
+          <ul class="mt-3 grid gap-2 transition-opacity" :class="{ 'opacity-55': isPlaceholderData }">
+            <li v-for="document in documents" :key="document.id" class="flex items-center justify-between gap-3 rounded-xl border border-default p-3">
+              <div class="min-w-0">
+                <NuxtLink class="font-semibold text-primary hover:underline hover:underline-offset-[0.2em]" :to="documentPath(document.id)">{{ document.title }}</NuxtLink>
+                <p v-if="document.author" class="mt-0.5 text-sm text-muted">{{ document.author }}</p>
+                <DocumentProvenance :created-at="document.createdAt" :uploaded-by="document.uploadedBy" :source="document.source" />
+              </div>
+              <UButton color="error" variant="outline" icon="i-lucide-trash-2" label="Delete" :aria-label="`Delete ${document.title}`" @click="removeDocument(document.id)" />
+            </li>
+          </ul>
+          <LibraryPagination :page="filters.page" :total-pages="listPage?.totalPages ?? 0" :link-for="pageLink" />
+        </template>
+        <ErrorState
+          v-if="deleteError && deleteId"
+          :error="deleteError"
+          :title="deleteTitle ? `Couldn’t delete “${deleteTitle}”` : 'Couldn’t delete the document'"
+          compact
+          :retrying="deleting"
+          @retry="removeDocument(deleteId, { confirmFirst: false })"
+          @dismiss="dismissDeleteError()"
+        />
+      </UCard>
+    </div>
   </main>
 </template>
-
-<style scoped>
-.doc-list.is-stale { opacity: 0.55; transition: opacity 120ms ease-in; }
-.doc-list li > div { min-width: 0; }
-</style>

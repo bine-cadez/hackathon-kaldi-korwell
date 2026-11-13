@@ -110,22 +110,27 @@
  * Nuxt UI semantic colours, tuned to kaldi.si: brown text on paper, orange
  * buttons. The older names (--paper, --accent, …) stay for the hand-drawn eye
  * and Panem animations.
+ *
+ * Every text colour meets WCAG AA (4.5:1) on both white and paper, and input
+ * borders meet 3:1. Kaldi orange (#fd4e1f) is only 3.3:1 under white text and
+ * 2.9:1 as text on paper, so primary is a deeper orange that passes both
+ * (5.2:1 and 4.6:1). The bright orange stays in the eye artwork.
  */
 :root {
-  --ui-primary: var(--ui-color-primary-500);
+  --ui-primary: #c9380f;
   --ui-error: var(--ui-color-error-600);
   --ui-success: #40774f;
   --ui-text: var(--color-kaldi-700);
   --ui-text-highlighted: var(--color-kaldi-900);
-  --ui-text-muted: #7a6650;
-  --ui-text-dimmed: #a08f78;
+  --ui-text-muted: #665340;
+  --ui-text-dimmed: #7a6650;
   --ui-text-inverted: var(--color-paper);
   --ui-bg: #fff;
   --ui-bg-muted: var(--color-paper);
   --ui-bg-elevated: var(--color-paper);
   --ui-bg-accented: #e7e0d6;
   --ui-border: #e1d9cf;
-  --ui-border-accented: #c9bba9;
+  --ui-border-accented: #968470;
   --ui-radius: 0.5rem;
 
   --paper: var(--color-paper);
@@ -142,7 +147,7 @@
 
 @layer base {
   body {
-    @apply min-h-screen bg-paper font-sans font-light text-default;
+    @apply min-h-screen bg-paper font-sans font-normal text-default;
   }
 
   h1, h2, h3 {
@@ -154,9 +159,26 @@
   }
 }
 
+/*
+ * A quiet backdrop behind every page: a faint Kaldi-orange glow top right, a
+ * warm brown one on the left, and fine paper grain. It is fixed to the
+ * viewport and too faint to change text contrast (text still passes AA).
+ */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .35 0 0 0 0 .24 0 0 0 0 .08 0 0 0 .13 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(55rem 38rem at 92% -8%, rgb(253 78 31 / 0.1), transparent 70%),
+    radial-gradient(45rem 40rem at -12% 55%, rgb(201 168 122 / 0.2), transparent 70%);
+}
+
 /* The orange uppercase label above a heading, as on kaldi.si. */
 @utility eyebrow {
-  @apply font-sans text-base font-normal uppercase text-primary;
+  @apply font-sans text-base font-normal tracking-wide uppercase text-primary;
 }
 
 /* Two columns as on kaldi.si: a heading on the left, content on the right. */
@@ -227,7 +249,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 /* Chat answers are rendered markdown (v-html), so they are styled here. */
-.chat-answer-body { font-size: 1.125rem; line-height: 1.65; overflow-wrap: anywhere; }
+.chat-answer-body { font-size: 1.0625rem; line-height: 1.7; overflow-wrap: anywhere; }
 .chat-answer-body > :first-child { margin-top: 0; }
 .chat-answer-body > :last-child { margin-bottom: 0; }
 .chat-answer-body :is(p, ul, ol) { margin: 0 0 0.7rem; }
@@ -242,7 +264,7 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 .chat-answer-body pre code { background: none; padding: 0; }
 
 /* Library document bodies are rendered markdown (v-html), so they are styled here. */
-.document-body { font-size: 1.125rem; line-height: 1.7; font-weight: 300; overflow-wrap: anywhere; }
+.document-body { font-size: 1.125rem; line-height: 1.7; font-weight: 400; overflow-wrap: anywhere; }
 .document-body > :first-child { margin-top: 0; }
 .document-body > :last-child { margin-bottom: 0; }
 .document-body :is(p, ul, ol, blockquote, pre, .document-table) { margin: 0 0 1rem; }

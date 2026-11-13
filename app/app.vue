@@ -20,7 +20,7 @@ useHead({
     <div class="flex min-h-screen flex-col [&>main]:flex-[1_0_auto]">
       <NuxtRouteAnnouncer />
       <AppHeader>
-        <nav aria-label="Main navigation" class="flex flex-wrap items-center gap-x-8 gap-y-2 uppercase lg:ml-auto">
+        <nav aria-label="Main navigation" class="flex flex-wrap items-center gap-x-8 gap-y-2 tracking-wide uppercase lg:ml-auto">
           <NuxtLink
             v-for="link in links"
             :key="link.to"

@@ -12,7 +12,7 @@ const { data: documents, error: listError, asyncStatus: listAsyncStatus, refetch
 const refreshing = computed(() => listAsyncStatus.value === 'loading' && !!documents.value)
 
 // /library?document=<id> opens that document. The upload page redirects here
-// after a save, and MCP search results cite this URL.
+// after a save, and chat answers and MCP search results cite this URL.
 const route = useRoute()
 const queryDocumentId = () => typeof route.query.document === 'string' && route.query.document ? route.query.document : null
 const selectedId = ref<string | null>(queryDocumentId())

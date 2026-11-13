@@ -2,6 +2,10 @@
 # Do not commit real keys.
 OPENROUTER_API_KEY=
 
+# Optional. OpenRouter model for the Ask page (/chat). Must support tool calling.
+# Empty = anthropic/claude-haiku-5.5.
+CHAT_MODEL=
+
 # Optional. Empty = unlocked. Production: npx wrangler secret put SITE_PASSWORD
 SITE_PASSWORD=
 

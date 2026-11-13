@@ -2,7 +2,9 @@
 
 Hackathon v1 of an internal document library. Someone pastes or uploads a text or markdown note, uploads a CSV, or uploads a PDF, Word (`.docx`), or Excel (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`) file. Workers AI converts those files to markdown first. On save the app chunks the text, calls OpenRouter for embeddings, stores the document and chunks in Cloudflare D1, and stores the vectors in Cloudflare Vectorize. Search embeds the query and returns the closest chunks with the source document title. After migration `0002`, search also matches title, author, and body with SQLite FTS5 and can limit results to a created-at date range.
 
-Chat is not in this version. Nothing is embedded until a person uploads it.
+The **Ask** page (`/chat`) answers questions about the archive. `POST /api/chat` sends the conversation to an OpenRouter chat model with the same tools the MCP server exposes (`search`, `fetch`, and `search_slack` once the Slack archive exists). The model chooses which to call, the Worker runs them in-process, and the answer streams back as newline-delimited JSON with links to its sources. The default model is `anthropic/claude-haiku-5.5`, the cheapest Claude on OpenRouter. Set `CHAT_MODEL` to any OpenRouter model id that supports tool calling to change it. It uses the same `OPENROUTER_API_KEY` as embeddings. Each question makes at most six model calls, and conversations are not stored.
+
+Nothing is embedded until a person uploads it.
 
 A shared password (`SITE_PASSWORD`) locks HTML pages and the data APIs when it is set. Leave it unset and the app stays open, which is the local/dev default. `GET /api/health` stays public either way. `public/robots.txt` disallows every crawler, and every response sends `X-Robots-Tag: noindex, nofollow`. [Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/) can replace this gate later. This repo does not enable Access. A `workers.dev` hostname is reachable until one of those gates is on.
 
@@ -63,6 +65,7 @@ npm test
 | `SLACK_BOT_TOKEN`    | Bot token (`xoxb-…`) for `users.info`, history, and permalinks. Unset = messages still store, names stay blank. Production: `npx wrangler secret put SLACK_BOT_TOKEN` |
 | `SLACK_CHANNEL_IDS`  | Comma-separated allow list (`C…`, `G…`). Empty = archive nothing. Production: `npx wrangler secret put SLACK_CHANNEL_IDS` |
 | `MCP_SIGNING_KEY`    | Signs MCP OAuth tokens. At least 32 characters. Empty disables `/mcp`. Production: `npx wrangler secret put MCP_SIGNING_KEY` |
+| `CHAT_MODEL`         | Optional. OpenRouter model id for the Ask page. Empty = `anthropic/claude-haiku-5.5`. Production: `npx wrangler secret put CHAT_MODEL` |
 
 Do not commit the key. Do not put it in `wrangler.jsonc`. Placeholders only live in `.env.example` and `.dev.vars.example`.
 

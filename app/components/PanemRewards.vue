@@ -1,5 +1,11 @@
 <script setup lang="ts">
-const props = defineProps<{ anchor: HTMLElement | null, form: HTMLFormElement | null, demo: boolean, replay: boolean }>()
+const props = defineProps<{
+  anchor: HTMLElement | null
+  form: HTMLFormElement | null
+  rewardsEnabled: boolean
+  demo: boolean
+  replay: boolean
+}>()
 const emit = defineEmits<{
   eyeTravel: [travel: { x: number, y: number, scale: number, returning: boolean, duration: number } | null]
   eyeBlackHole: [open: boolean]
@@ -13,6 +19,7 @@ const travelTime = 1750
 const returnTime = 1100
 const woltFlightTime = 4000
 const fillTime = 550
+const refillTime = 3600
 const vortex = ref({ x: 0, y: 0 })
 const woltFlying = ref(false)
 const format = new Intl.NumberFormat('en')
@@ -47,6 +54,11 @@ const words = ref(0)
 const clicks = ref(0)
 const lastAdded = ref(0)
 const phase = ref<'collecting' | 'full' | 'swallowing' | 'wolt' | 'voucher'>('collecting')
+const refilled = ref(false)
+const showingProgress = computed(() => phase.value === 'collecting' || phase.value === 'full' || phase.value === 'swallowing')
+const refillStart = computed(() => showingProgress.value ? words.value / wordsPerEye : 0)
+const canRefill = computed(() => intro.value === 'done' && !refilled.value && !woltFlying.value &&
+  phase.value !== 'full' && phase.value !== 'swallowing')
 const voucherReference = ref('')
 const voucherUrl = computed(() => '/api/demo/panem/' + voucherReference.value + '.svg')
 const fillButton = ref<HTMLButtonElement | null>(null)
@@ -173,7 +185,12 @@ function borderEyeStyle (eye: typeof borderEyes[number], index: number) {
 }
 
 function eyeFill (fillOrder: number) {
-  return Math.max(0, Math.min(100, (words.value / wordsPerEye - fillOrder) * 100))
+  return Math.max(0, Math.min(100, (refillStart.value - fillOrder) * 100))
+}
+
+function refillDelay (fillOrder: number) {
+  const remaining = Math.max(1, eyeCount - refillStart.value)
+  return Math.max(0, (fillOrder - refillStart.value) / remaining) * refillTime
 }
 
 onMounted(() => {
@@ -184,7 +201,7 @@ onMounted(() => {
     if (props.form) observer.observe(props.form)
   }
 
-  if (!props.demo) {
+  if (props.rewardsEnabled && !props.demo) {
     try {
       const saved = JSON.parse(localStorage.getItem(progressKey) ?? '{}')
       if (Number.isSafeInteger(saved.words) && saved.words >= 0) words.value = saved.words
@@ -217,6 +234,7 @@ onMounted(() => {
 
 function playIntro (delay: number) {
   clearTimeout(introTimer)
+  refilled.value = false
   intro.value = 'waiting'
   introTimer = setTimeout(() => {
     measureField()
@@ -242,6 +260,7 @@ function finishIntro () {
 
 function fillEyes () {
   if (phase.value !== 'collecting' || intro.value !== 'done') return
+  refilled.value = false
   const remaining = demoGoal - words.value
   clicks.value += 1
   const clicksLeft = roundLength - clicks.value
@@ -264,7 +283,8 @@ function saveProgress () {
 }
 
 function creditDocument (wordCount: number) {
-  if (props.demo || wordCount <= 0) return
+  if (!props.rewardsEnabled || props.demo || wordCount <= 0) return
+  refilled.value = false
   lastAdded.value = wordCount
   words.value += wordCount
   saveProgress()
@@ -392,6 +412,7 @@ async function openVoucher () {
 }
 
 async function startNextRound () {
+  refilled.value = false
   words.value = props.demo ? 0 : Math.max(0, words.value - demoGoal)
   clicks.value = 0
   lastAdded.value = 0
@@ -414,7 +435,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="panem" aria-labelledby="panem-title">
+  <div class="panem">
     <svg class="eye-symbols" width="0" height="0" aria-hidden="true">
       <defs>
         <path id="panem-iris" d="M37 59c22-28 51-39 83-39 34 0 63 14 83 39-21 26-50 42-83 42-34 0-63-16-83-42Z"/>
@@ -426,13 +447,19 @@ onBeforeUnmount(() => {
           <circle cx="125" cy="56" r="21" stroke-width="3"/>
           <path d="M18 60h9m186 0h9M130 45h13"/>
         </g>
+        <g id="panem-eye-color">
+          <use href="#panem-iris" fill="#fd4e1f" />
+          <use href="#panem-pupil" fill="#382811" />
+          <use href="#panem-eye-lines" />
+          <path fill="#f2f0ed" d="M130 42h13v5h-13z"/>
+        </g>
       </defs>
     </svg>
 
     <div
       ref="field"
       class="eye-field"
-      :class="[intro, { swallowing: phase === 'swallowing' }]"
+      :class="[intro, { swallowing: phase === 'swallowing', refilled, 'eyes-hidden': !showingProgress && !refilled }]"
       :style="{
         '--origin-x': source.x + '%',
         '--origin-y': source.y + '%',
@@ -442,7 +469,6 @@ onBeforeUnmount(() => {
     >
       <svg
         v-for="(eye, index) in layout.eyes"
-        v-show="phase === 'collecting' || phase === 'full' || phase === 'swallowing'"
         :key="index"
         class="small-eye"
         viewBox="0 0 240 120"
@@ -453,25 +479,21 @@ onBeforeUnmount(() => {
           '--size': eye.size,
           '--delay': eye.delay + 'ms',
           '--unfilled': 100 - eyeFill(eye.fillOrder) + '%',
+          ...(refilled ? { '--refill-delay': refillDelay(eye.fillOrder) + 'ms' } : {}),
           ...(phase === 'swallowing'
             ? pullStyle(eye.x * fieldSize.width / 100, eye.y * fieldSize.height / 100, index)
             : {})
         }"
       >
         <use href="#panem-eye-lines" />
-        <g class="eye-color">
-          <use href="#panem-iris" fill="#fd4e1f" />
-          <use href="#panem-pupil" fill="#382811" />
-          <use href="#panem-eye-lines" />
-          <path fill="#f2f0ed" d="M130 42h13v5h-13z"/>
-        </g>
+        <g class="eye-color"><use href="#panem-eye-color" /></g>
       </svg>
     </div>
 
     <div
-      v-if="intro === 'done' && (phase === 'collecting' || phase === 'full' || phase === 'swallowing') && formBox.width"
+      v-if="intro === 'done' && (showingProgress || refilled) && formBox.width"
       class="border-eye-field"
-      :class="{ swallowing: phase === 'swallowing' }"
+      :class="{ swallowing: phase === 'swallowing', refilled }"
       aria-hidden="true"
     >
       <svg
@@ -482,14 +504,15 @@ onBeforeUnmount(() => {
         :style="borderEyeStyle(eye, index)"
       >
         <use href="#panem-eye-lines" />
+        <g class="eye-color" style="--unfilled: 100%; --refill-delay: 1.8s"><use href="#panem-eye-color" /></g>
       </svg>
     </div>
 
-    <div class="panem-banner" :class="{ 'is-swallowing': phase === 'swallowing' }">
+    <section v-if="rewardsEnabled" class="panem-banner" :class="{ 'is-swallowing': phase === 'swallowing' }" aria-labelledby="panem-title">
       <div class="panem-content">
         <h2 id="panem-title"><strong>Panem</strong> et circenses.</h2>
 
-        <div v-if="phase === 'collecting' || phase === 'full' || phase === 'swallowing'" class="progress-card">
+        <div v-if="showingProgress" class="progress-card">
           <div class="progress-label">
             <span>Words toward lunch</span>
             <strong>{{ format.format(Math.min(words, demoGoal)) }} <span>/ {{ format.format(demoGoal) }}</span></strong>
@@ -529,10 +552,22 @@ onBeforeUnmount(() => {
         </div>
 
       </div>
-    </div>
+    </section>
 
+    <button
+      class="refill-eyes"
+      type="button"
+      :disabled="!canRefill"
+      aria-label="Refill the eyes"
+      title="Refill the eyes"
+      @click="refilled = true"
+    >
+      <svg width="22" height="12" viewBox="0 0 240 120" aria-hidden="true">
+        <use href="#panem-eye-lines" />
+      </svg>
+    </button>
     <span v-if="phase === 'swallowing'" class="sr-only" role="status">All eyes filled. Revealing your lunch reward.</span>
-  </section>
+  </div>
 </template>
 
 <style scoped>
@@ -575,6 +610,28 @@ onBeforeUnmount(() => {
   clip-path: inset(0 var(--unfilled) 0 0);
   transition: clip-path 500ms ease;
 }
+.eyes-hidden .small-eye { visibility: hidden; }
+.refilled .eye-color {
+  clip-path: inset(0);
+  transition-delay: var(--refill-delay);
+}
+
+.refill-eyes {
+  position: fixed;
+  inset-inline-end: max(0.85rem, env(safe-area-inset-right));
+  inset-block-end: max(0.85rem, env(safe-area-inset-bottom));
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+}
+.refill-eyes:hover:not(:disabled), .refill-eyes:focus-visible { border-color: var(--accent); }
+.refill-eyes:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.refill-eyes:disabled { cursor: default; opacity: 0.65; }
 
 .waiting .small-eye {
   left: var(--origin-x);
@@ -659,7 +716,7 @@ progress {
   .panem-content { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .eye-color, .scattering .small-eye { transition: none; }
+  .eye-color, .refilled .eye-color, .scattering .small-eye { transition: none; }
   .replay-intro { display: none; }
 }
 </style>

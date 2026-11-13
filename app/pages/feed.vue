@@ -12,6 +12,7 @@ const ACCEPT_LABEL = '.md, .txt, .pdf, .docx, .xlsx, or .csv'
 const route = useRoute()
 const rewardsEnabled = import.meta.dev
 const panemDemo = computed(() => rewardsEnabled && route.query.panem === '1')
+const replayIntro = computed(() => rewardsEnabled && route.query.intro === 'replay')
 const rewards = ref<{ creditDocument: (wordCount: number) => void } | null>(null)
 const feedEye = ref<HTMLElement | null>(null)
 const uploadForm = ref<HTMLFormElement | null>(null)
@@ -196,7 +197,7 @@ async function saveDocument () {
 </script>
 
 <template>
-  <main class="feed-page" :class="{ 'feed-with-rewards': rewardsEnabled }">
+  <main class="feed-page feed-with-eyes">
     <div class="archive-page">
       <div ref="feedEye" class="feed-heading">
         <ArchiveEye
@@ -271,17 +272,19 @@ async function saveDocument () {
         />
       </form>
     </div>
-    <PanemRewards
-      v-if="rewardsEnabled"
-      :key="`${panemDemo}:${route.query.intro === 'replay'}`"
-      ref="rewards"
-      :anchor="feedEye"
-      :form="uploadForm"
-      :demo="panemDemo"
-      :replay="route.query.intro === 'replay'"
-      @eye-travel="eyeTravel = $event"
-      @eye-black-hole="eyeBlackHole = $event"
-    />
+    <ClientOnly>
+      <PanemRewards
+        :key="`${panemDemo}:${replayIntro}`"
+        ref="rewards"
+        :anchor="feedEye"
+        :form="uploadForm"
+        :rewards-enabled="rewardsEnabled"
+        :demo="panemDemo"
+        :replay="replayIntro"
+        @eye-travel="eyeTravel = $event"
+        @eye-black-hole="eyeBlackHole = $event"
+      />
+    </ClientOnly>
   </main>
 </template>
 
@@ -335,7 +338,7 @@ async function saveDocument () {
 
 .dropzone-hint { color: var(--muted); font-size: 0.85rem; }
 
-.feed-with-rewards {
+.feed-with-eyes {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -343,7 +346,7 @@ async function saveDocument () {
   min-height: calc(100svh - 4rem);
   overflow: clip;
 }
-.feed-with-rewards > .archive-page {
+.feed-with-eyes > .archive-page {
   margin-block: 0;
   padding-bottom: 1.5rem;
 }
@@ -367,7 +370,7 @@ async function saveDocument () {
   line-height: 1.12;
   margin-bottom: 1.4rem;
 }
-.feed-with-rewards .feed-heading :is(h1, .eyebrow) {
+.feed-with-eyes .feed-heading :is(h1, .eyebrow) {
   -webkit-text-stroke: 0.2em var(--paper);
   paint-order: stroke fill;
 }

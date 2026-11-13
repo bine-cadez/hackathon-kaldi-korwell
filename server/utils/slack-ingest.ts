@@ -1,5 +1,5 @@
 import type { SlackWebClient } from './slack-api.ts'
-import type { DocDatabase } from './env.ts'
+import type { D1Statement, DocDatabase } from './env.ts'
 import {
   readChannelName,
   readUser,
@@ -256,79 +256,175 @@ export class SlackDirectory {
   private teamId: string | null
   private now: string
   private preferPermalinkApi: boolean
+  private deferWrites: boolean
+  private userCache = new Map<string, { displayName: string, realName: string }>()
+  private channelCache = new Map<string, string>()
+  private pendingUsers = new Map<string, { displayName: string, realName: string }>()
+  private pendingChannels = new Map<string, string>()
 
   constructor (
     db: DocDatabase,
     client: SlackWebClient | null,
     teamId: string | null,
     now: string,
-    preferPermalinkApi: boolean
+    preferPermalinkApi: boolean,
+    deferWrites = false
   ) {
     this.db = db
     this.client = client
     this.teamId = teamId
     this.now = now
     this.preferPermalinkApi = preferPermalinkApi
+    this.deferWrites = deferWrites
   }
 
   async user (userId: string, fallbackName?: string | null): Promise<{ displayName: string, realName: string }> {
+    const remembered = this.userCache.get(userId)
+    if (remembered) return remembered
+    if (this.deferWrites && this.client) {
+      try {
+        const info = await this.client.usersInfo(userId)
+        const names = info ?? { displayName: fallbackName || '', realName: '' }
+        this.userCache.set(userId, names)
+        if (info) this.pendingUsers.set(userId, names)
+        return names
+      } catch (error) {
+        console.error(JSON.stringify({
+          message: 'slack_user_lookup_failed',
+          userId,
+          error: error instanceof Error ? error.message : String(error)
+        }))
+        const names = { displayName: fallbackName || '', realName: '' }
+        this.userCache.set(userId, names)
+        return names
+      }
+    }
     const cached = await readUser(this.db, userId)
     const fresh = cached ? Date.now() - Date.parse(cached.updated_at) < USER_CACHE_MS : false
     if (cached && fresh && (cached.display_name || cached.real_name)) {
-      return { displayName: cached.display_name, realName: cached.real_name }
+      const names = { displayName: cached.display_name, realName: cached.real_name }
+      this.userCache.set(userId, names)
+      return names
     }
     if (!this.client) {
-      return {
+      const names = {
         displayName: cached?.display_name || fallbackName || '',
         realName: cached?.real_name || ''
       }
+      this.userCache.set(userId, names)
+      return names
     }
     try {
       const info = await this.client.usersInfo(userId)
-      if (!info) {
-        return {
-          displayName: cached?.display_name || fallbackName || '',
-          realName: cached?.real_name || ''
+      const names = info ?? {
+        displayName: cached?.display_name || fallbackName || '',
+        realName: cached?.real_name || ''
+      }
+      this.userCache.set(userId, names)
+      if (info) {
+        if (this.deferWrites) this.pendingUsers.set(userId, names)
+        else {
+          await rememberUser(this.db, {
+            userId,
+            teamId: this.teamId,
+            displayName: names.displayName,
+            realName: names.realName,
+            updatedAt: this.now
+          })
         }
       }
-      await rememberUser(this.db, {
-        userId,
-        teamId: this.teamId,
-        displayName: info.displayName,
-        realName: info.realName,
-        updatedAt: this.now
-      })
-      return info
+      return names
     } catch (error) {
       console.error(JSON.stringify({
         message: 'slack_user_lookup_failed',
         userId,
         error: error instanceof Error ? error.message : String(error)
       }))
-      return {
+      const names = {
         displayName: cached?.display_name || fallbackName || '',
         realName: cached?.real_name || ''
       }
+      this.userCache.set(userId, names)
+      return names
     }
   }
 
   async channel (channelId: string): Promise<string> {
+    const remembered = this.channelCache.get(channelId)
+    if (remembered != null) return remembered
+    if (this.deferWrites && this.client) {
+      try {
+        const info = await this.client.conversationsInfo(channelId)
+        const name = info?.name || ''
+        this.channelCache.set(channelId, name)
+        if (name) this.pendingChannels.set(channelId, name)
+        return name
+      } catch (error) {
+        console.error(JSON.stringify({
+          message: 'slack_channel_lookup_failed',
+          channelId,
+          error: error instanceof Error ? error.message : String(error)
+        }))
+        this.channelCache.set(channelId, '')
+        return ''
+      }
+    }
     const cached = await readChannelName(this.db, channelId)
-    if (cached) return cached
-    if (!this.client) return ''
+    if (cached) {
+      this.channelCache.set(channelId, cached)
+      return cached
+    }
+    if (!this.client) {
+      this.channelCache.set(channelId, '')
+      return ''
+    }
     try {
       const info = await this.client.conversationsInfo(channelId)
-      if (!info?.name) return ''
-      await rememberChannel(this.db, channelId, this.teamId, info.name, this.now)
-      return info.name
+      const name = info?.name || ''
+      this.channelCache.set(channelId, name)
+      if (name) {
+        if (this.deferWrites) this.pendingChannels.set(channelId, name)
+        else await rememberChannel(this.db, channelId, this.teamId, name, this.now)
+      }
+      return name
     } catch (error) {
       console.error(JSON.stringify({
         message: 'slack_channel_lookup_failed',
         channelId,
         error: error instanceof Error ? error.message : String(error)
       }))
+      this.channelCache.set(channelId, '')
       return ''
     }
+  }
+
+  // User and channel rows queued during a backfill, written in the same batch as the messages.
+  drainWrites (): D1Statement[] {
+    const statements: D1Statement[] = []
+    for (const [userId, names] of this.pendingUsers) {
+      statements.push(this.db.prepare(
+        `INSERT INTO slack_users (user_id, team_id, display_name, real_name, updated_at)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (user_id) DO UPDATE SET
+           display_name = excluded.display_name,
+           real_name = excluded.real_name,
+           team_id = COALESCE(excluded.team_id, slack_users.team_id),
+           updated_at = excluded.updated_at`
+      ).bind(userId, this.teamId, names.displayName, names.realName, this.now))
+    }
+    this.pendingUsers.clear()
+    for (const [channelId, name] of this.pendingChannels) {
+      statements.push(this.db.prepare(
+        `INSERT INTO slack_channels (channel_id, team_id, name, updated_at)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (channel_id) DO UPDATE SET
+           name = excluded.name,
+           team_id = COALESCE(excluded.team_id, slack_channels.team_id),
+           updated_at = excluded.updated_at`
+      ).bind(channelId, this.teamId, name, this.now))
+    }
+    this.pendingChannels.clear()
+    return statements
   }
 
   async permalink (channelId: string, ts: string, threadTs: string | null, permalinkApi: boolean): Promise<string> {

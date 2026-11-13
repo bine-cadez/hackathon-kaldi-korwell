@@ -31,16 +31,36 @@ export class SlackApiError extends Error {
   }
 }
 
+// The caller asked not to sleep through Retry-After (it would run past the backfill deadline).
+export class SlackRateLimitPause extends Error {
+  retryAfterMs: number
+
+  constructor (retryAfterMs: number) {
+    super('slack_rate_limited')
+    this.name = 'SlackRateLimitPause'
+    this.retryAfterMs = retryAfterMs
+  }
+}
+
 const HISTORY_LIMIT = '200'
 const MAX_ATTEMPTS = 6
 
 export function createSlackWebClient (token: string, options?: {
   fetch?: typeof fetch
   sleep?: (ms: number) => Promise<void>
+  // Return false to stop instead of sleeping. Backfill uses this so a Retry-After
+  // that would pass the deadline becomes a resume cursor.
+  allowWait?: (retryAfterMs: number) => boolean
 }): SlackWebClient {
   const fetchImpl = options?.fetch ?? fetch
   const sleep = options?.sleep ?? ((ms: number) => new Promise(resolve => setTimeout(resolve, ms)))
   const trimmed = token.trim()
+
+  async function waitForRetry (header: string | null) {
+    const delay = retryDelayMs(header)
+    if (options?.allowWait && !options.allowWait(delay)) throw new SlackRateLimitPause(delay)
+    await sleep(delay)
+  }
 
   async function call (method: string, params: Record<string, string>): Promise<Record<string, unknown>> {
     if (!trimmed) throw new SlackApiError('not_configured')
@@ -53,12 +73,12 @@ export function createSlackWebClient (token: string, options?: {
         headers: { authorization: `Bearer ${trimmed}` }
       })
       if (response.status === 429) {
-        await sleep(retryDelayMs(response.headers.get('retry-after')))
+        await waitForRetry(response.headers.get('retry-after'))
         continue
       }
       const payload = await response.json() as Record<string, unknown>
       if (payload.ok === false && payload.error === 'ratelimited' && attempt < MAX_ATTEMPTS - 1) {
-        await sleep(retryDelayMs(response.headers.get('retry-after')))
+        await waitForRetry(response.headers.get('retry-after'))
         continue
       }
       return payload

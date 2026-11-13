@@ -125,30 +125,10 @@ export async function readMessage (db: DocDatabase, channelId: string, ts: strin
 }
 
 export async function storeNewMessage (db: DocDatabase, draft: SlackMessageDraft): Promise<'inserted' | 'filled' | 'unchanged'> {
-  const existing = await readMessage(db, draft.channelId, draft.ts)
-  if (!existing) {
-    await insertMessage(db, draft)
-    return 'inserted'
-  }
-  if (existing.deleted) return 'unchanged'
-  const patch: Patch = {}
-  if (!existing.text && draft.text) {
-    patch.text = draft.text
-    patch.raw_event = JSON.stringify(draft.rawEvent)
-    patch.subtype = draft.subtype
-    patch.is_bot = draft.isBot ? 1 : 0
-    patch.bot_id = draft.botId
-    patch.mentions = JSON.stringify(draft.mentions)
-    patch.links = JSON.stringify(draft.links)
-    patch.files = JSON.stringify(draft.files)
-    patch.thread_ts = draft.threadTs
-    if (draft.replyCount != null) patch.reply_count = draft.replyCount
-    if (draft.editedAt) patch.edited_at = draft.editedAt
-  }
-  fillBlanks(existing, draft, patch)
-  if (Object.keys(patch).length === 0) return 'unchanged'
-  await patchMessage(db, draft.channelId, draft.ts, patch, draft.updatedAt)
-  return 'filled'
+  const inserted = await insertMessage(db, draft, 'nothing')
+  if (inserted > 0) return 'inserted'
+  const filled = await fillBlankMessage(db, draft)
+  return filled > 0 ? 'filled' : 'unchanged'
 }
 
 export async function storeEditedMessage (
@@ -162,7 +142,7 @@ export async function storeEditedMessage (
     const history = previousText && previousText !== draft.text
       ? [{ text: previousText, edited_at: draft.editedAt, user_id: editorId }]
       : draft.editHistory
-    await insertMessage(db, { ...draft, editHistory: history })
+    await insertMessage(db, { ...draft, editHistory: history }, 'snapshot')
     return 'inserted'
   }
   if (existing.deleted) return 'unchanged'
@@ -193,63 +173,69 @@ export async function storeEditedMessage (
 }
 
 export async function storeDeletedMessage (db: DocDatabase, draft: SlackMessageDraft): Promise<'inserted' | 'deleted' | 'unchanged'> {
-  const existing = await readMessage(db, draft.channelId, draft.ts)
-  if (!existing) {
-    await insertMessage(db, { ...draft, deleted: true })
-    return 'inserted'
-  }
-  if (existing.deleted) return 'unchanged'
-  const patch: Patch = {
-    deleted: 1,
-    deleted_at: draft.deletedAt,
-    raw_event: JSON.stringify(draft.rawEvent)
-  }
-  if (!existing.text && draft.text) patch.text = draft.text
-  fillBlanks(existing, draft, patch)
-  await patchMessage(db, draft.channelId, draft.ts, patch, draft.updatedAt)
-  return 'deleted'
+  const tombstone = { ...draft, deleted: true }
+  const updated = await db.prepare(
+    `UPDATE slack_messages
+     SET deleted = 1,
+         deleted_at = ?,
+         raw_event = ?,
+         text = CASE WHEN text = '' THEN ? ELSE text END,
+         updated_at = ?
+     WHERE channel_id = ? AND ts = ? AND deleted = 0`
+  ).bind(
+    tombstone.deletedAt,
+    JSON.stringify(tombstone.rawEvent),
+    tombstone.text,
+    tombstone.updatedAt,
+    tombstone.channelId,
+    tombstone.ts
+  ).run()
+  if (statementChanges(updated) > 0) return 'deleted'
+  const inserted = await insertMessage(db, tombstone, 'nothing')
+  return inserted > 0 ? 'inserted' : 'unchanged'
 }
 
 export async function storeSnapshot (db: DocDatabase, draft: SlackMessageDraft): Promise<'inserted' | 'updated' | 'unchanged'> {
-  const existing = await readMessage(db, draft.channelId, draft.ts)
-  if (!existing) {
-    await insertMessage(db, draft)
-    return 'inserted'
-  }
-  if (existing.deleted && !draft.deleted) return 'unchanged'
-  if (!draft.deleted && existing.edited_at && draft.editedAt && Number(existing.edited_at) > Number(draft.editedAt)) {
-    return 'unchanged'
-  }
-  const history = parseHistory(existing.edit_history)
-  if (!draft.deleted && existing.text && existing.text !== draft.text && draft.editedAt) {
-    if (!history.some(entry => entry.text === existing.text && entry.edited_at === draft.editedAt)) {
-      history.push({ text: existing.text, edited_at: draft.editedAt, user_id: draft.userId })
-    }
-  }
-  const patch: Patch = {
-    text: draft.deleted && existing.text ? existing.text : draft.text,
-    edited_at: draft.editedAt ?? existing.edited_at,
-    edit_history: JSON.stringify((draft.editHistory.length ? draft.editHistory : history).slice(-20)),
-    deleted: draft.deleted ? 1 : existing.deleted,
-    deleted_at: draft.deleted ? (draft.deletedAt ?? existing.deleted_at) : existing.deleted_at,
-    subtype: draft.subtype,
-    is_bot: draft.isBot ? 1 : 0,
-    bot_id: draft.botId,
-    mentions: JSON.stringify(draft.mentions),
-    links: JSON.stringify(draft.links),
-    files: JSON.stringify(draft.files),
-    raw_event: JSON.stringify(draft.rawEvent)
-  }
-  if (draft.threadTs) patch.thread_ts = draft.threadTs
-  if (draft.replyCount != null) patch.reply_count = draft.replyCount
-  if (draft.userId) patch.user_id = draft.userId
-  if (draft.userDisplayName) patch.user_display_name = draft.userDisplayName
-  if (draft.userRealName) patch.user_real_name = draft.userRealName
-  if (draft.channelName) patch.channel_name = draft.channelName
-  if (draft.teamId) patch.team_id = draft.teamId
-  if (draft.permalink && !existing.permalink) patch.permalink = draft.permalink
-  await patchMessage(db, draft.channelId, draft.ts, patch, draft.updatedAt)
-  return 'updated'
+  const written = await insertMessage(db, draft, 'snapshot')
+  return written > 0 ? 'updated' : 'unchanged'
+}
+
+export function messageSnapshotStatement (db: Pick<DocDatabase, 'prepare'>, draft: SlackMessageDraft): D1Statement {
+  return db.prepare(
+    `INSERT INTO slack_messages (
+       channel_id, ts, team_id, channel_name, user_id, user_display_name, user_real_name,
+       thread_ts, reply_count, text, edited_at, edit_history, deleted, deleted_at, subtype,
+       is_bot, bot_id, mentions, links, files, permalink, raw_event, created_at, updated_at
+     ) VALUES (${placeholders(24)})
+     ON CONFLICT(channel_id, ts) DO UPDATE SET
+       team_id = COALESCE(excluded.team_id, slack_messages.team_id),
+       channel_name = CASE WHEN excluded.channel_name != '' THEN excluded.channel_name ELSE slack_messages.channel_name END,
+       user_id = COALESCE(excluded.user_id, slack_messages.user_id),
+       user_display_name = CASE WHEN excluded.user_display_name != '' THEN excluded.user_display_name ELSE slack_messages.user_display_name END,
+       user_real_name = CASE WHEN excluded.user_real_name != '' THEN excluded.user_real_name ELSE slack_messages.user_real_name END,
+       thread_ts = COALESCE(excluded.thread_ts, slack_messages.thread_ts),
+       reply_count = COALESCE(excluded.reply_count, slack_messages.reply_count),
+       text = excluded.text,
+       edited_at = COALESCE(excluded.edited_at, slack_messages.edited_at),
+       edit_history = CASE WHEN excluded.edit_history != '[]' THEN excluded.edit_history ELSE slack_messages.edit_history END,
+       deleted = CASE WHEN excluded.deleted = 1 THEN 1 ELSE slack_messages.deleted END,
+       deleted_at = CASE WHEN excluded.deleted = 1 THEN excluded.deleted_at ELSE slack_messages.deleted_at END,
+       subtype = COALESCE(excluded.subtype, slack_messages.subtype),
+       is_bot = excluded.is_bot,
+       bot_id = COALESCE(excluded.bot_id, slack_messages.bot_id),
+       mentions = excluded.mentions,
+       links = excluded.links,
+       files = excluded.files,
+       permalink = COALESCE(slack_messages.permalink, excluded.permalink),
+       raw_event = excluded.raw_event,
+       updated_at = excluded.updated_at
+     WHERE slack_messages.deleted = 0
+       AND (
+         slack_messages.edited_at IS NULL
+         OR excluded.edited_at IS NULL
+         OR CAST(slack_messages.edited_at AS REAL) <= CAST(excluded.edited_at AS REAL)
+       )`
+  ).bind(...messageValues(draft))
 }
 
 export async function storeReplyCount (db: DocDatabase, channelId: string, ts: string, replyCount: number, updatedAt: string): Promise<void> {
@@ -381,14 +367,97 @@ function fillBlanks (existing: StoredMessage, draft: SlackMessageDraft, patch: P
   if (existing.reply_count == null && draft.replyCount != null && patch.reply_count == null) patch.reply_count = draft.replyCount
 }
 
-async function insertMessage (db: DocDatabase, draft: SlackMessageDraft) {
-  await db.prepare(
-    `INSERT INTO slack_messages (
-       channel_id, ts, team_id, channel_name, user_id, user_display_name, user_real_name,
-       thread_ts, reply_count, text, edited_at, edit_history, deleted, deleted_at, subtype,
-       is_bot, bot_id, mentions, links, files, permalink, raw_event, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+async function insertMessage (db: DocDatabase, draft: SlackMessageDraft, conflict: 'nothing' | 'snapshot'): Promise<number> {
+  const statement = conflict === 'snapshot'
+    ? messageSnapshotStatement(db, draft)
+    : db.prepare(
+      `INSERT INTO slack_messages (
+         channel_id, ts, team_id, channel_name, user_id, user_display_name, user_real_name,
+         thread_ts, reply_count, text, edited_at, edit_history, deleted, deleted_at, subtype,
+         is_bot, bot_id, mentions, links, files, permalink, raw_event, created_at, updated_at
+       ) VALUES (${placeholders(24)})
+       ON CONFLICT(channel_id, ts) DO NOTHING`
+    ).bind(...messageValues(draft))
+  return statementChanges(await statement.run())
+}
+
+async function fillBlankMessage (db: DocDatabase, draft: SlackMessageDraft): Promise<number> {
+  const mentions = JSON.stringify(draft.mentions)
+  const links = JSON.stringify(draft.links)
+  const files = JSON.stringify(draft.files)
+  const raw = JSON.stringify(draft.rawEvent)
+  const result = await db.prepare(
+    `UPDATE slack_messages SET
+       text = CASE WHEN text = '' THEN ? ELSE text END,
+       raw_event = CASE WHEN text = '' THEN ? ELSE raw_event END,
+       subtype = CASE WHEN text = '' THEN ? ELSE subtype END,
+       is_bot = CASE WHEN text = '' THEN ? ELSE is_bot END,
+       bot_id = COALESCE(bot_id, ?),
+       mentions = CASE WHEN text = '' THEN ? ELSE mentions END,
+       links = CASE WHEN text = '' THEN ? ELSE links END,
+       files = CASE WHEN files = '[]' AND ? != '[]' THEN ? ELSE files END,
+       thread_ts = COALESCE(thread_ts, ?),
+       reply_count = COALESCE(reply_count, ?),
+       edited_at = COALESCE(edited_at, ?),
+       user_id = COALESCE(user_id, ?),
+       user_display_name = CASE WHEN user_display_name = '' AND ? != '' THEN ? ELSE user_display_name END,
+       user_real_name = CASE WHEN user_real_name = '' AND ? != '' THEN ? ELSE user_real_name END,
+       channel_name = CASE WHEN channel_name = '' AND ? != '' THEN ? ELSE channel_name END,
+       permalink = COALESCE(permalink, ?),
+       team_id = COALESCE(team_id, ?),
+       updated_at = ?
+     WHERE channel_id = ? AND ts = ? AND deleted = 0
+       AND (
+         (text = '' AND ? != '')
+         OR (user_id IS NULL AND ? IS NOT NULL)
+         OR (user_display_name = '' AND ? != '')
+         OR (user_real_name = '' AND ? != '')
+         OR (channel_name = '' AND ? != '')
+         OR (permalink IS NULL AND ? IS NOT NULL)
+         OR (team_id IS NULL AND ? IS NOT NULL)
+         OR (files = '[]' AND ? != '[]')
+         OR (reply_count IS NULL AND ? IS NOT NULL)
+       )`
   ).bind(
+    draft.text,
+    raw,
+    draft.subtype,
+    draft.isBot ? 1 : 0,
+    draft.botId,
+    mentions,
+    links,
+    files,
+    files,
+    draft.threadTs,
+    draft.replyCount,
+    draft.editedAt,
+    draft.userId,
+    draft.userDisplayName,
+    draft.userDisplayName,
+    draft.userRealName,
+    draft.userRealName,
+    draft.channelName,
+    draft.channelName,
+    draft.permalink,
+    draft.teamId,
+    draft.updatedAt,
+    draft.channelId,
+    draft.ts,
+    draft.text,
+    draft.userId,
+    draft.userDisplayName,
+    draft.userRealName,
+    draft.channelName,
+    draft.permalink,
+    draft.teamId,
+    files,
+    draft.replyCount
+  ).run()
+  return statementChanges(result)
+}
+
+function messageValues (draft: SlackMessageDraft): unknown[] {
+  return [
     draft.channelId,
     draft.ts,
     draft.teamId,
@@ -413,7 +482,17 @@ async function insertMessage (db: DocDatabase, draft: SlackMessageDraft) {
     JSON.stringify(draft.rawEvent),
     draft.createdAt,
     draft.updatedAt
-  ).run()
+  ]
+}
+
+function placeholders (count: number): string {
+  return Array.from({ length: count }, () => '?').join(', ')
+}
+
+function statementChanges (result: unknown): number {
+  if (!result || typeof result !== 'object' || !('meta' in result)) return 0
+  const changes = (result as { meta?: { changes?: number } }).meta?.changes
+  return typeof changes === 'number' ? changes : 0
 }
 
 async function patchMessage (db: DocDatabase, channelId: string, ts: string, patch: Patch, updatedAt: string) {

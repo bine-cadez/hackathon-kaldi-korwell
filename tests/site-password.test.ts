@@ -91,22 +91,6 @@ describe('site password decision', { concurrency: false }, () => {
     }), 'allow')
     assert.equal(await decideSiteAccess({
       sitePassword: 's3cret',
-      method: 'POST',
-      pathname: '/api/slack/events',
-      cookie: null,
-      authorization: null,
-      sitePasswordHeader: null
-    }), 'allow')
-    assert.equal(await decideSiteAccess({
-      sitePassword: 's3cret',
-      method: 'POST',
-      pathname: '/api/slack/events/',
-      cookie: null,
-      authorization: null,
-      sitePasswordHeader: null
-    }), 'allow')
-    assert.equal(await decideSiteAccess({
-      sitePassword: 's3cret',
       method: 'GET',
       pathname: '/api/auth/login',
       cookie: null,

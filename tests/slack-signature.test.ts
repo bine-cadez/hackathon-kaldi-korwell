@@ -84,8 +84,7 @@ test('url_verification returns the challenge and a bad signature does not', asyn
     body
   }))
   assert.equal(bad.status, 401)
-  const payload = await bad.json() as { error?: string }
-  assert.equal(payload.error, 'invalid_signature')
+  assert.deepEqual(await bad.json(), { ok: false })
 
   const staleAt = String(Number(now) - 301)
   const stale = await handler(new Request('https://library.test/api/slack/events', {
@@ -98,7 +97,7 @@ test('url_verification returns the challenge and a bad signature does not', asyn
     body
   }))
   assert.equal(stale.status, 401)
-  assert.equal((await stale.json() as { error?: string }).error, 'stale_timestamp')
+  assert.deepEqual(await stale.json(), { ok: false })
 })
 
 test('missing signing secret answers not configured', async () => {

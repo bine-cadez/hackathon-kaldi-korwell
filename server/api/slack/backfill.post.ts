@@ -37,12 +37,16 @@ export default defineEventHandler(async (event) => {
       })
     }
     const resume = resumeFrom(record.resume)
+    const deadlineMs = import.meta.dev ? 60_000 : 20_000
+    const started = Date.now()
     const report = await backfillSlackChannels({
       db,
-      client: createSlackWebClient(settings.botToken),
+      client: createSlackWebClient(settings.botToken, {
+        allowWait: (retryAfterMs) => Date.now() + retryAfterMs <= started + deadlineMs
+      }),
       channelIds,
       resume,
-      deadlineMs: import.meta.dev ? 60_000 : 20_000
+      deadlineMs
     })
     console.log(JSON.stringify({
       message: 'slack_backfill',
@@ -62,10 +66,22 @@ export default defineEventHandler(async (event) => {
 
 function resumeFrom (value: unknown): BackfillResume | null {
   if (!value || typeof value !== 'object') return null
-  const record = value as { channelId?: unknown, historyCursor?: unknown }
+  const record = value as {
+    channelId?: unknown
+    historyCursor?: unknown
+    pageOffset?: unknown
+    threadTs?: unknown
+    repliesCursor?: unknown
+  }
   if (typeof record.channelId !== 'string' || !record.channelId) return null
+  const pageOffset = typeof record.pageOffset === 'number' && Number.isFinite(record.pageOffset)
+    ? Math.max(0, Math.trunc(record.pageOffset))
+    : 0
   return {
     channelId: record.channelId,
-    historyCursor: typeof record.historyCursor === 'string' ? record.historyCursor : ''
+    historyCursor: typeof record.historyCursor === 'string' ? record.historyCursor : '',
+    pageOffset,
+    threadTs: typeof record.threadTs === 'string' && record.threadTs ? record.threadTs : null,
+    repliesCursor: typeof record.repliesCursor === 'string' ? record.repliesCursor : null
   }
 }

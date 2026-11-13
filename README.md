@@ -235,7 +235,7 @@ Setup, in order, after this branch is on `main` and the deploy workflow has appl
 4. Access Bypass for `/api/slack/events` only.
 5. Paste the request URL into the Slack app and install it.
 6. Invite the bot to each allow-listed channel.
-7. Sign in to Korwell and `POST /api/slack/backfill` (optional JSON `{ "channelIds": ["C…"], "resume": { "channelId", "historyCursor" } }`). Slack Free history is about 90 days. The route paginates `conversations.history` and `conversations.replies`, honors `429 Retry-After`, and returns `partial` plus `resume` if it runs out of time.
+7. Sign in to Korwell and `POST /api/slack/backfill` (optional JSON `{ "channelIds": ["C…"], "resume": { "channelId", "historyCursor", "pageOffset", "threadTs", "repliesCursor" } }`). Slack Free history is about 90 days. Each call stays under D1's free-plan query cap (a batch of writes counts as one query) and returns `partial: true` with a resume cursor when the budget, the time limit, or a `Retry-After` that would overrun the deadline is reached. Call again with that `resume` until `partial` is false. A channel Slack refuses is reported on its own and the next channel still runs. A rejected event signature is a generic 401; the reason is only in the Worker logs.
 
 The search page has a Slack tab: full text, plus channel, person, and a UTC date range on the message timestamp. Results show the author, channel, time, thread snippet, and permalink.
 

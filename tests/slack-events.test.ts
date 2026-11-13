@@ -4,6 +4,7 @@ import { createApp, defineEventHandler, toWebHandler } from 'h3'
 import test from 'node:test'
 import events from '../server/api/slack/events.post.ts'
 import { ingestSlackCallback } from '../server/utils/slack-ingest.ts'
+import { storeEditedMessage, storeNewMessage, type SlackMessageDraft } from '../server/utils/slack-store.ts'
 import { searchSlackMessages } from '../server/utils/slack-search.ts'
 import { fakeSlackClient, openSlackDb } from './slack-db.ts'
 
@@ -267,6 +268,51 @@ test('signed retries store one row and other channels are ignored', async () => 
   assert.equal(ignored.pending.length, 0)
   const count = await first.db.prepare('SELECT count(*) AS n FROM slack_messages').first<{ n: number }>()
   assert.equal(count?.n, 1)
+})
+
+test('concurrent duplicate saves do not raise a unique constraint error', async () => {
+  const { sqlite, db } = openSlackDb()
+  const draft: SlackMessageDraft = {
+    channelId: channel,
+    ts: '1714554000.000100',
+    teamId: 'T1',
+    channelName: 'splošno',
+    userId: 'UMAJA',
+    userDisplayName: 'maja',
+    userRealName: 'Maja Župan',
+    threadTs: null,
+    replyCount: null,
+    text: 'isti dogodek',
+    editedAt: null,
+    editHistory: [],
+    deleted: false,
+    deletedAt: null,
+    subtype: null,
+    isBot: false,
+    botId: null,
+    mentions: [],
+    links: [],
+    files: [],
+    permalink: 'https://slack.com/archives/C_ALLOW/p1714554000000100',
+    rawEvent: { ts: '1714554000.000100' },
+    createdAt: now,
+    updatedAt: now
+  }
+  const saved = await Promise.all([
+    storeNewMessage(db, draft),
+    storeNewMessage(db, draft)
+  ])
+  assert.equal(sqlite.prepare('SELECT count(*) AS n FROM slack_messages').get()?.n, 1)
+  assert.ok(saved.includes('inserted'))
+  assert.equal(saved.every(action => action === 'inserted' || action === 'unchanged'), true)
+
+  const edited = { ...draft, text: 'isti dogodek, popravljen', editedAt: '1714554100.000100', ts: '1714554100.000200' }
+  const edits = await Promise.all([
+    storeEditedMessage(db, edited, 'staro', 'UMAJA'),
+    storeEditedMessage(db, edited, 'staro', 'UMAJA')
+  ])
+  assert.equal(sqlite.prepare('SELECT count(*) AS n FROM slack_messages WHERE ts = ?').get(edited.ts)?.n, 1)
+  assert.ok(edits.every(action => action === 'inserted' || action === 'edited' || action === 'unchanged'))
 })
 
 test('events before the migration return not configured', async () => {

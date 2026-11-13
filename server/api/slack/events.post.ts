@@ -41,8 +41,9 @@ export default defineEventHandler(async (event) => {
       rawBody
     })
     if (!verdict.ok) {
-      setResponseStatus(event, verdict.status)
-      return { ok: false, error: verdict.reason, message: verdict.message }
+      console.log(JSON.stringify({ message: 'slack_signature_rejected', reason: verdict.reason }))
+      setResponseStatus(event, 401)
+      return { ok: false }
     }
 
     let envelope: unknown

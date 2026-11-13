@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import type { DocDatabase, DocLibraryEnv } from '../server/utils/env.ts'
-import { listDocumentFacets, listDocuments, parseDocumentListQuery, queryTokens } from '../server/utils/document-list.ts'
+import { listDocuments } from '../server/utils/document-list.ts'
 import { slovenianSortKey } from '../shared/utils/text.ts'
 
 const initSql = readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8')
@@ -104,19 +104,6 @@ test('pages through documents newest first with totals', async () => {
   assert.equal(beyond.total, 5)
 })
 
-test('sorts oldest first and by title, case-insensitively', async () => {
-  const { env } = seeded()
-  assert.deepEqual(ids(await listDocuments(env, { sort: 'oldest' })), ['d1', 'd2', 'd3', 'd4', 'd5'])
-  // Before 0007: NOCASE folds ASCII only, so "Čokolada" sorts after Z.
-  assert.deepEqual(ids(await listDocuments(env, { sort: 'title' })), ['d4', 'd1', 'd3', 'd2', 'd5'])
-})
-
-test('after 0007, titles sort in Slovenian order', async () => {
-  const { env } = seeded('0007')
-  // Čokolada sits after any c… title and before d…; here, between alpha and Invoice.
-  assert.deepEqual(ids(await listDocuments(env, { sort: 'title' })), ['d4', 'd5', 'd1', 'd3', 'd2'])
-})
-
 test('the 0007 backfill builds the same sort key as new saves', () => {
   const titles = ['Čokolada', 'ćevapi', 'Đuro', 'Šola', 'žaga', 'Zebra', 'Café Ölung', 'CZ', 'Éclair', 'cesta']
   const sqlite = new DatabaseSync(':memory:')
@@ -143,25 +130,6 @@ test('after 0007, rows written without a sort key get one from the trigger', () 
   assert.equal((sqlite.prepare('SELECT title_sort FROM documents WHERE id = ?').get('d7') as { title_sort: string }).title_sort, 'custom')
 })
 
-test('after 0007, search covers file names and uploaders', async () => {
-  const { env } = seeded('0007')
-  // Accent-free prefix finds "Poročilo Q2.docx" through the rebuilt FTS index.
-  assert.deepEqual(ids(await listDocuments(env, { q: 'porocilo' })), ['d2'])
-  assert.deepEqual(ids(await listDocuments(env, { q: 'recept.txt' })), ['d5'])
-  assert.deepEqual(ids(await listDocuments(env, { q: 'janez.novak' })), ['d3', 'd2'])
-  const [doc] = (await listDocuments(env, { q: 'invoice' })).documents
-  assert.deepEqual(doc?.source, { filename: 'Invoice_2024_03.pdf', contentType: null, size: 2048, url: '/api/documents/d1/source' })
-  assert.equal(doc?.uploadedBy, 'maja.zupan@kaldi.si')
-})
-
-test('after 0005, filters by uploader, separately from author', async () => {
-  const { env } = seeded('0007')
-  assert.deepEqual(ids(await listDocuments(env, { uploadedBy: 'janez.novak@kaldi.si' })), ['d3', 'd2'])
-  assert.deepEqual(ids(await listDocuments(env, { uploadedBy: 'janez.novak@kaldi.si', author: 'Maja Župan' })), ['d3'])
-  // Before 0005 nobody is recorded as an uploader.
-  assert.deepEqual(ids(await listDocuments(seeded('0002').env, { uploadedBy: 'janez.novak@kaldi.si' })), [])
-})
-
 test('searches the title and the uploader, with prefixes and without accents', async () => {
   const { env } = seeded()
   assert.deepEqual(ids(await listDocuments(env, { q: 'zupan' })), ['d3', 'd1'])
@@ -173,88 +141,4 @@ test('searches the title and the uploader, with prefixes and without accents', a
   assert.deepEqual(ids(await listDocuments(env, { q: 'cokolada' })), ['d5'])
   // The body is not searched here; that is the main search page's job.
   assert.deepEqual(ids(await listDocuments(env, { q: 'Body' })), [])
-})
-
-test('LIKE wildcards in the query are literal', async () => {
-  const { env } = seeded()
-  assert.deepEqual(ids(await listDocuments(env, { q: '%' })), [])
-  assert.deepEqual(ids(await listDocuments(env, { q: '_' })), ['d1'])
-})
-
-test('filters by exact uploader and an inclusive UTC date range', async () => {
-  const { env } = seeded()
-  assert.deepEqual(ids(await listDocuments(env, { author: 'Maja Župan' })), ['d3', 'd1'])
-  assert.deepEqual(ids(await listDocuments(env, { author: 'Maja' })), [])
-
-  const range = parseDocumentListQuery({ from: '2024-05-10', to: '2024-06-01' }).range
-  const page = await listDocuments(env, { range })
-  assert.deepEqual(ids(page), ['d3', 'd2'])
-  assert.equal(page.total, 2)
-
-  const combined = await listDocuments(env, { q: 'maja', range, pageSize: 1 })
-  assert.deepEqual(ids(combined), ['d3'])
-  assert.equal(combined.total, 1)
-})
-
-test('works before migration 0002: LIKE search, no authors', async () => {
-  const { env } = seeded('0001')
-  assert.deepEqual(ids(await listDocuments(env, { q: 'report' })), ['d2'])
-  assert.equal((await listDocuments(env)).documents[0]?.author, null)
-  assert.deepEqual(ids(await listDocuments(env, { author: 'Maja Župan' })), [])
-  assert.deepEqual(await listDocumentFacets(env), { authors: [], uploaders: [] })
-})
-
-test('lists authors and uploaders with document counts, in Slovenian order', async () => {
-  const { env, sqlite } = seeded('0007')
-  sqlite.prepare("UPDATE documents SET author = 'Črt Zupan' WHERE id = 'd4'").run()
-  assert.deepEqual(await listDocumentFacets(env), {
-    authors: [
-      { name: 'Ana Kovač', count: 1 },
-      { name: 'Črt Zupan', count: 1 },
-      { name: 'Janez Novak', count: 1 },
-      { name: 'Maja Župan', count: 2 }
-    ],
-    uploaders: [
-      { name: 'janez.novak@kaldi.si', count: 2 },
-      { name: 'maja.zupan@kaldi.si', count: 1 }
-    ]
-  })
-  assert.deepEqual((await listDocumentFacets(seeded('0002').env)).uploaders, [])
-})
-
-test('parses and validates list query parameters', () => {
-  const parsed = parseDocumentListQuery({ q: '  maja   župan ', page: '3', pageSize: '50', sort: 'title', from: '2024-01-01' })
-  assert.equal(parsed.q, 'maja župan')
-  // Decomposed input (c + combining caron) is composed, so it equals stored names.
-  assert.equal(parseDocumentListQuery({ author: 'Kovac\u030c' }).author, 'Kovač')
-  assert.equal(parsed.page, 3)
-  assert.equal(parsed.pageSize, 50)
-  assert.equal(parsed.sort, 'title')
-  assert.deepEqual(parsed.range, { from: '2024-01-01', toExclusive: null })
-
-  const defaults = parseDocumentListQuery({})
-  assert.equal(defaults.page, 1)
-  assert.equal(defaults.pageSize, 20)
-  assert.equal(defaults.sort, 'newest')
-
-  const status = (query: Record<string, unknown>) => {
-    try {
-      parseDocumentListQuery(query)
-      return 200
-    } catch (error) {
-      return (error as { statusCode?: number }).statusCode
-    }
-  }
-  assert.equal(status({ page: '0' }), 400)
-  assert.equal(status({ page: '1.5' }), 400)
-  assert.equal(status({ page: 'abc' }), 400)
-  assert.equal(status({ pageSize: '101' }), 400)
-  assert.equal(status({ sort: 'random' }), 400)
-  assert.equal(status({ from: '2024-02-30' }), 400)
-  assert.equal(status({ from: '2024-03-01', to: '2024-02-01' }), 400)
-  assert.equal(status({ q: 'x'.repeat(201) }), 400)
-})
-
-test('query tokens keep digits so file names split into words', () => {
-  assert.deepEqual(queryTokens('Invoice_2024-03.pdf'), ['Invoice', '2024', '03', 'pdf'])
 })

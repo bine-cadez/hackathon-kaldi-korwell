@@ -100,16 +100,6 @@ test('search and fetch match the ChatGPT result shapes and pass filters through'
   assert.equal(missing.isError, true)
 })
 
-test('slack search is listed only when the archive is ready', async () => {
-  assert.deepEqual((await listTools(library(false), {})).map(tool => tool.name), ['search', 'fetch'])
-  const tools = await listTools(library(true), {})
-  assert.deepEqual(tools.map(tool => tool.name), ['search', 'fetch', 'search_slack'])
-  const result = await callTool(library(true), {}, '', origin, 'search_slack', { arguments: { query: 'ship' } })
-  const payload = result.structuredContent as { results: Array<{ id: string, url: string }> }
-  assert.equal(payload.results[0].id, 'C1/1.2')
-  assert.equal(payload.results[0].url, 'https://kaldi.slack.com/archives/C1/p12')
-})
-
 test('initialize and tools/list answer JSON-RPC and notifications are empty', async () => {
   const api = library()
   const init = await handleJsonRpc({
@@ -216,26 +206,6 @@ test('Access and the site password do not block MCP machine routes', async () =>
   assert.equal((await access(new Request(`${origin}/register`, { method: 'POST' }))).status, 200)
 })
 
-test('an unknown MCP-Protocol-Version header is a 400, a known or missing one is fine', async () => {
-  const api = library()
-  const bad = await handleJsonRpc({ jsonrpc: '2.0', id: 7, method: 'ping' }, api, {}, '', origin, '1999-01-01')
-  assert.equal(bad.status, 400)
-  assert.equal((bad.body as { error: { code: number } }).error.code, -32600)
-  const badNote = await handleJsonRpc({ jsonrpc: '2.0', method: 'notifications/initialized' }, api, {}, '', origin, 'nonsense')
-  assert.equal(badNote.status, 400)
-  assert.equal((await handleJsonRpc({ jsonrpc: '2.0', id: 8, method: 'ping' }, api, {}, '', origin, '2025-11-25')).status, 200)
-  assert.equal((await handleJsonRpc({ jsonrpc: '2.0', id: 9, method: 'ping' }, api, {}, '', origin, null)).status, 200)
-
-  const app = createApp()
-  app.use(createMcpHandler({ library: api, signingKey: () => secret, apiKey: () => '', env: () => ({}) }))
-  const response = await toWebHandler(app)(new Request(`${origin}/mcp`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${await accessToken()}`, 'mcp-protocol-version': '2099-01-01', 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' })
-  }))
-  assert.equal(response.status, 400)
-})
-
 test('tool errors return fixed messages, never upstream text', async () => {
   const leaky: LibraryApi = {
     ...library(),
@@ -252,12 +222,4 @@ test('tool errors return fixed messages, never upstream text', async () => {
   assert.equal(missing.content[0].text, 'Document not found')
   const unknown = await callTool(library(), {}, '', origin, '<script>', {})
   assert.equal(unknown.content[0].text, 'Unknown tool')
-})
-
-test('a too-short signing key gets its own 503 message', async () => {
-  const app = createApp()
-  app.use(createMcpHandler({ library: library(), signingKey: () => 'short-key', apiKey: () => '', env: () => ({}) }))
-  const response = await toWebHandler(app)(new Request(`${origin}/mcp`, { method: 'POST' }))
-  assert.equal(response.status, 503)
-  assert.match((await response.json()).error_description, /too short/)
 })

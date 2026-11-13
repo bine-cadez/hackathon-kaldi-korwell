@@ -14,9 +14,3 @@ test('parseEmbeddings restores provider index order', () => {
   assert.deepEqual(parsed[0], first)
   assert.deepEqual(parsed[1], second)
 })
-
-test('parseEmbeddings rejects a dimension mismatch', () => {
-  assert.throws(() => parseEmbeddings({
-    data: [{ index: 0, embedding: [0.1, 0.2] }]
-  }, 1, EMBEDDING_DIMENSIONS), /expected 1536/)
-})

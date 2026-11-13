@@ -2,7 +2,7 @@
 
 Hackathon v1 of an internal document library. Someone pastes or uploads a text or markdown note, uploads a CSV, or uploads a PDF, Word (`.docx`), or Excel (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`) file. Workers AI converts those files to markdown first. On save the app chunks the text, calls OpenRouter for embeddings, stores the document and chunks in Cloudflare D1, and stores the vectors in Cloudflare Vectorize. Search embeds the query and returns the closest chunks with the source document title. After migration `0002`, search also matches title, author, and body with SQLite FTS5 and can limit results to a created-at date range.
 
-The **Ask** page (`/chat`) answers questions about the archive. `POST /api/chat` sends the conversation to an OpenRouter chat model with the same tools the MCP server exposes (`search`, `fetch`, and `search_slack` once the Slack archive exists). The model chooses which to call, the Worker runs them in-process, and the answer streams back as newline-delimited JSON with links to its sources. The default model is `anthropic/claude-haiku-5.5`, the cheapest Claude on OpenRouter. Set `CHAT_MODEL` to any OpenRouter model id that supports tool calling to change it. It uses the same `OPENROUTER_API_KEY` as embeddings. Each question makes at most six model calls, and conversations are not stored.
+The **Ask** page is the home page (`/`; the old `/chat` address redirects there). It answers questions about the archive. `POST /api/chat` sends the conversation to an OpenRouter chat model with the same tools the MCP server exposes (`search`, `fetch`, and `search_slack` once the Slack archive exists). The model chooses which to call, the Worker runs them in-process, and the answer streams back as newline-delimited JSON with links to its sources. The default model is `anthropic/claude-haiku-5.5`, the cheapest Claude on OpenRouter. Set `CHAT_MODEL` to any OpenRouter model id that supports tool calling to change it. It uses the same `OPENROUTER_API_KEY` as embeddings. Each question makes at most six model calls, and conversations are not stored.
 
 Nothing is embedded until a person uploads it.
 
@@ -310,7 +310,7 @@ npx wrangler d1 execute DB --local --command "SELECT document_id, author FROM do
 
 `cokolada` and `zupan` find the row with the carons. A search limited to `from=2024-06-01` does not.
 
-`GET /api/documents` returns one page of the Library: `{ documents, total, page, pageSize, totalPages }`. Query parameters, all optional: `q` (words in the title, author, file name, or uploader email; prefix and accent-insensitive with FTS5, substring otherwise), `author` (exact name), `uploadedBy` (exact uploader email), `from` and `to` (inclusive UTC dates, `YYYY-MM-DD`), `sort` (`newest`, `oldest`, or `title`), `page` (from 1), and `pageSize` (1–100, default 20). Invalid values return 400. `GET /api/documents/facets` returns `{ authors, uploaders }`, each name with a document count, for the Library's Author and Uploaded by filters. The Library page keeps the same filters in its URL (`/library?q=…&author=…&uploader=…&page=2`). Each document has its own page at `/library/<id>`; the search page keeps its query in the URL too (`/?q=…&author=…`), so Back from a document returns to the results.
+`GET /api/documents` returns one page of the Library: `{ documents, total, page, pageSize, totalPages }`. Query parameters, all optional: `q` (words in the title, author, file name, or uploader email; prefix and accent-insensitive with FTS5, substring otherwise), `author` (exact name), `uploadedBy` (exact uploader email), `from` and `to` (inclusive UTC dates, `YYYY-MM-DD`), `sort` (`newest`, `oldest`, or `title`), `page` (from 1), and `pageSize` (1–100, default 20). Invalid values return 400. `GET /api/documents/facets` returns `{ authors, uploaders }`, each name with a document count, for the Library's Author and Uploaded by filters. The Library page keeps the same filters in its URL (`/library?q=…&author=…&uploader=…&page=2`). The Library is a split view: the list on the left, and the open document on the right at `/library/<id>`. The list's filters ride along in the query string while a document is open, so opening one never resets the list.
 
 ### Sorting, file-name search, and Slovenian text
 
@@ -352,7 +352,7 @@ Setup, in order, after this branch is on `main` and the deploy workflow has appl
 6. Invite the bot to each allow-listed channel.
 7. Sign in to Korwell and `POST /api/slack/backfill` (optional JSON `{ "channelIds": ["C…"], "resume": { "channelId", "historyCursor", "pageOffset", "threadTs", "repliesCursor" } }`). Slack Free history is about 90 days. Each call stays under D1's free-plan query cap (a batch of writes counts as one query) and returns `partial: true` with a resume cursor when the budget, the time limit, or a `Retry-After` that would overrun the deadline is reached. Call again with that `resume` until `partial` is false. A channel Slack refuses is reported on its own and the next channel still runs. A rejected event signature is a generic 401; the reason is only in the Worker logs.
 
-The search page has a Slack tab: full text, plus channel, person, and a UTC date range on the message timestamp. Results show the author, channel, time, thread snippet, and permalink.
+Ask searches the Slack archive with the `search_slack` tool: full text, plus channel, person, and a UTC date range on the message timestamp. `POST /api/slack/search` serves the same search over HTTP.
 
 Local check after `npm run db:migrate:local`:
 
@@ -379,7 +379,8 @@ server/api/             upload, list, search, Slack events
 server/routes/          MCP endpoint and OAuth authorize, token, register
 server/middleware/      X-Robots-Tag, the shared-password / Access gate, OAuth discovery
 server/utils/           file-to-markdown conversion, chunk, OpenRouter embeddings, D1/Vectorize writes, FTS and date helpers, Slack archive, MCP tools
-app/pages/index.vue     document search (date, title, author filters) and the Slack search tab
+app/pages/index.vue     Ask: questions about the archive, answered with sources
+app/pages/library.vue   Library list (search, filters, pages) beside the reader in library/
 app/pages/feed.vue      paste/upload (text, PDF, Word, Excel), including optional author
 app/pages/connect.vue   MCP server URL and Claude connector setup steps
 ```

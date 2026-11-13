@@ -8,13 +8,15 @@ const props = defineProps<{
   page: number
   totalPages: number
   linkFor: (page: number) => RouteLocationRaw
+  /** Previous and Next around "Page 2 of 9", for narrow columns. */
+  compact?: boolean
 }>()
 
 const items = computed(() => paginationItems(props.page, props.totalPages))
 
 // Pill links in the Kaldi style, matching Nuxt UI's outline buttons.
 const pill = 'inline-flex min-h-10 items-center justify-center rounded-full border tabular-nums focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary'
-const linkClass = 'border-default text-primary hover:border-primary'
+const linkClass = 'border-accented text-default hover:border-primary hover:text-primary'
 const pageClass = `${pill} min-w-10 px-3`
 const stepClass = `${pill} gap-1.5 px-3.5`
 const disabledClass = 'border-default text-muted opacity-50'
@@ -33,7 +35,8 @@ const disabledClass = 'border-default text-muted opacity-50'
     </NuxtLink>
     <span v-else :class="[stepClass, disabledClass]" aria-disabled="true"><UIcon name="i-lucide-arrow-left" class="size-4" /> Previous</span>
 
-    <ol class="m-0 flex list-none flex-wrap justify-center gap-1.5 p-0">
+    <p v-if="compact" class="m-0 text-sm text-muted tabular-nums" aria-current="page">Page {{ page }} of {{ totalPages }}</p>
+    <ol v-else class="m-0 flex list-none flex-wrap justify-center gap-1.5 p-0">
       <li v-for="(item, index) in items" :key="item ?? `gap-${index}`">
         <span v-if="item === null" class="inline-grid min-h-10 min-w-6 place-items-center text-muted" aria-hidden="true">…</span>
         <span v-else-if="item === page" :class="[pageClass, 'border-primary bg-primary font-bold text-inverted']" aria-current="page">

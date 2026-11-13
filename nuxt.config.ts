@@ -50,6 +50,8 @@ export default defineNuxtConfig({
     }
   },
   routeRules: {
+    // Ask moved to the home page when the Search page was removed.
+    '/chat': { redirect: { to: '/', statusCode: 301 } },
     '/**': {
       headers: {
         'X-Robots-Tag': 'noindex, nofollow'

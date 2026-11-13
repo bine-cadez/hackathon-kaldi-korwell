@@ -337,7 +337,7 @@ onBeforeUnmount(stop)
         @keydown="onKeydown"
       />
       <UButton v-if="streaming" type="button" icon="i-lucide-square" size="xl" square aria-label="Stop answering" title="Stop" @click="stop" />
-      <UButton v-else type="submit" icon="i-lucide-arrow-right" size="xl" square :disabled="!draft.trim()" aria-label="Send" title="Send (Enter)" />
+      <UButton v-else type="submit" icon="i-lucide-search" size="xl" square :disabled="!draft.trim()" aria-label="Ask Korwell" title="Ask Korwell (Enter)" />
     </form>
     <ul v-if="!turns.length" class="mt-4 mb-8 flex flex-wrap justify-center gap-2" aria-label="Example questions">
       <li v-for="suggestion in suggestions" :key="suggestion">

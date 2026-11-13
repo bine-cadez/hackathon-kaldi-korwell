@@ -3,7 +3,7 @@ import { createError, defineEventHandler, getQuery, getRouterParam, setHeader } 
 export default defineEventHandler((event) => {
   const file = getRouterParam(event, 'file') ?? ''
   const reference = /^(DEMO-[0-9A-F]{8})\.svg$/.exec(file)?.[1]
-  if (!import.meta.dev || !reference) throw createError({ statusCode: 404 })
+  if (!reference) throw createError({ statusCode: 404 })
 
   setHeader(event, 'Content-Type', 'image/svg+xml; charset=utf-8')
   if (getQuery(event).preview !== '1') {

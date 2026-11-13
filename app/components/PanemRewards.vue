@@ -3,6 +3,7 @@ const props = defineProps<{
   anchor: HTMLElement | null
   form: HTMLFormElement | null
   rewardsEnabled: boolean
+  saving: boolean
   demo: boolean
   replay: boolean
 }>()
@@ -19,7 +20,9 @@ const travelTime = 1750
 const returnTime = 1100
 const woltFlightTime = 4000
 const fillTime = 550
+const eyeColorTime = 500
 const refillTime = 3600
+const uploadColorTime = 4000
 const vortex = ref({ x: 0, y: 0 })
 const woltFlying = ref(false)
 const format = new Intl.NumberFormat('en')
@@ -31,37 +34,42 @@ const fieldSize = ref({ width: 1200, height: 900 })
 const source = ref({ x: 50, y: 0 })
 const formBox = ref({ x: 0, y: 0, width: 0, height: 0 })
 const borderEyes = [
-  { side: 'top', position: 0.19, angle: -19 },
-  { side: 'top', position: 0.77, angle: 14 },
-  { side: 'left', position: 0.22, angle: 16 },
-  { side: 'right', position: 0.36, angle: -12 },
-  { side: 'left', position: 0.76, angle: -16 },
-  { side: 'right', position: 0.84, angle: 18 },
-  { side: 'bottom', position: 0.65, angle: -13 }
+  { side: 'top', position: 0.27, angle: -16, width: 36, opacity: 0.52 },
+  { side: 'left', position: 0.29, angle: 13, width: 34, opacity: 0.42 },
+  { side: 'right', position: 0.47, angle: -11, width: 40, opacity: 0.55 },
+  { side: 'left', position: 0.79, angle: -18, width: 39, opacity: 0.48 },
+  { side: 'bottom', position: 0.72, angle: 12, width: 33, opacity: 0.44 }
 ] as const
 
 function borderEyePosition (eye: typeof borderEyes[number]) {
   const { x, y, width, height } = formBox.value
   switch (eye.side) {
-    case 'top': return { x: x + width * eye.position, y: y - 2 }
+    case 'top': return { x: x + width * eye.position, y: y }
     case 'bottom': return { x: x + width * eye.position, y: y + height + 2 }
-    case 'left': return { x: x - 9, y: y + height * eye.position }
-    case 'right': return { x: x + width + 9, y: y + height * eye.position }
+    case 'left': return { x: x - 6, y: y + height * eye.position }
+    case 'right': return { x: x + width + 6, y: y + height * eye.position }
   }
 }
 
 const words = ref(0)
 const clicks = ref(0)
 const lastAdded = ref(0)
-const phase = ref<'collecting' | 'full' | 'swallowing' | 'wolt' | 'voucher'>('collecting')
-const refilled = ref(false)
+type RewardPhase = 'collecting' | 'full' | 'swallowing' | 'wolt' | 'voucher'
+const phase = ref<RewardPhase>('collecting')
+const preview = ref<{ previousPhase: RewardPhase, filledEyes: number, voucher: string } | null>(null)
+const uploadWords = ref(0)
+const uploadFill = ref<{ start: number, count: number } | null>(null)
+let finishUploadColor: (() => void) | undefined
 const showingProgress = computed(() => phase.value === 'collecting' || phase.value === 'full' || phase.value === 'swallowing')
-const refillStart = computed(() => showingProgress.value ? words.value / wordsPerEye : 0)
-const canRefill = computed(() => intro.value === 'done' && !refilled.value && !woltFlying.value &&
-  phase.value !== 'full' && phase.value !== 'swallowing')
+const refillStart = computed(() => preview.value?.filledEyes ?? (showingProgress.value ? (words.value + uploadWords.value) / wordsPerEye : 0))
+const ending = computed(() => phase.value === 'full' || phase.value === 'swallowing' || woltFlying.value)
+const canRefill = computed(() => intro.value === 'done' && !props.saving && !ending.value &&
+  (!props.rewardsEnabled || !preview.value))
 const voucherReference = ref('')
-const voucherUrl = computed(() => '/api/demo/panem/' + voucherReference.value + '.svg')
+const voucherUrl = computed(() => '/api/demo/panem/' + (preview.value?.voucher ?? voucherReference.value) + '.svg')
 const fillButton = ref<{ $el: HTMLElement } | null>(null)
+const refillButton = ref<HTMLButtonElement | null>(null)
+const woltTarget = ref<HTMLElement | null>(null)
 const woltButton = ref<HTMLButtonElement | null>(null)
 const voucherTicket = ref<HTMLAnchorElement | null>(null)
 let observer: ResizeObserver | undefined
@@ -142,6 +150,8 @@ function measureField () {
   const form = props.form?.getBoundingClientRect()
   if (form) {
     formBox.value = { x: form.left - bounds.left, y: form.top - bounds.top, width: form.width, height: form.height }
+  } else {
+    formBox.value = { x: 0, y: 0, width: 0, height: 0 }
   }
   fieldSize.value = { width: bounds.width, height: bounds.height }
   if (eye) {
@@ -179,6 +189,8 @@ function borderEyeStyle (eye: typeof borderEyes[number], index: number) {
   return {
     left: x + 'px',
     top: y + 'px',
+    width: eye.width + 'px',
+    '--rest-opacity': eye.opacity,
     '--angle': eye.angle + 'deg',
     ...(phase.value === 'swallowing' ? pullStyle(x, y, eyeCount + index) : {})
   }
@@ -192,6 +204,19 @@ function refillDelay (fillOrder: number) {
   const remaining = Math.max(1, eyeCount - refillStart.value)
   return Math.max(0, (fillOrder - refillStart.value) / remaining) * refillTime
 }
+
+function uploadDelay (fillOrder: number) {
+  const fill = uploadFill.value
+  if (!fill) return 0
+  const progress = Math.max(0, Math.min(1, (fillOrder - fill.start) / Math.max(1, fill.count - 1)))
+  return progress * (uploadColorTime - eyeColorTime)
+}
+
+watch(() => props.form, (form, previousForm) => {
+  if (previousForm) observer?.unobserve(previousForm)
+  if (form) observer?.observe(form)
+  measureField()
+}, { flush: 'post' })
 
 onMounted(() => {
   measureField()
@@ -234,7 +259,6 @@ onMounted(() => {
 
 function playIntro (delay: number) {
   clearTimeout(introTimer)
-  refilled.value = false
   intro.value = 'waiting'
   introTimer = setTimeout(() => {
     measureField()
@@ -260,7 +284,6 @@ function finishIntro () {
 
 function fillEyes () {
   if (phase.value !== 'collecting' || intro.value !== 'done') return
-  refilled.value = false
   const remaining = demoGoal - words.value
   clicks.value += 1
   const clicksLeft = roundLength - clicks.value
@@ -282,18 +305,62 @@ function saveProgress () {
   }
 }
 
-function creditDocument (wordCount: number) {
-  if (!props.rewardsEnabled || props.demo || wordCount <= 0) return
-  refilled.value = false
-  lastAdded.value = wordCount
-  words.value += wordCount
-  saveProgress()
-  if (words.value >= demoGoal && phase.value === 'collecting') revealReward()
+async function colorSavedDocument (wordCount: number) {
+  if (wordCount <= 0) return
+
+  // A completed preview can be cleared before showing this upload's progress.
+  clearTimeout(introTimer)
+  clearTimeout(revealTimer)
+  if (intro.value !== 'done') finishIntro()
+  const previousPhase = preview.value?.previousPhase ?? phase.value
+  preview.value = null
+  phase.value = 'collecting'
+  await nextTick()
+  // Commit the starting color state before setting the new fill level.
+  field.value?.getBoundingClientRect()
+
+  const start = refillStart.value
+  if (props.rewardsEnabled && !props.demo) {
+    lastAdded.value = wordCount
+    words.value += wordCount
+    saveProgress()
+  } else {
+    // A short upload should still light up enough eyes to be visible around the form.
+    uploadWords.value = Math.max(wordCount, 24 * wordsPerEye)
+  }
+
+  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const end = Math.min(eyeCount, refillStart.value)
+    uploadFill.value = { start: Math.floor(start), count: Math.ceil(end) - Math.floor(start) }
+    await new Promise<void>((resolve) => {
+      finishUploadColor = resolve
+      revealTimer = setTimeout(resolve, uploadColorTime + 100)
+    })
+    finishUploadColor = undefined
+    uploadFill.value = null
+  }
+
+  phase.value = previousPhase
 }
 
-defineExpose({ creditDocument })
+defineExpose({ colorSavedDocument, ending })
 
-function revealReward () {
+function refillEyes () {
+  if (!canRefill.value) return
+  preview.value = { previousPhase: phase.value, filledEyes: showingProgress.value ? refillStart.value : 0, voucher: '' }
+  revealReward(refillTime + eyeColorTime)
+}
+
+async function finishPreview () {
+  if (!preview.value) return
+  const { previousPhase } = preview.value
+  phase.value = previousPhase === 'collecting' && words.value >= demoGoal ? 'wolt' : previousPhase
+  preview.value = null
+  await nextTick()
+  refillButton.value?.focus({ preventScroll: true })
+}
+
+function revealReward (delay = fillTime) {
   phase.value = 'full'
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
   if (reducedMotion) {
@@ -301,13 +368,13 @@ function revealReward () {
     return
   }
 
-  props.anchor?.scrollIntoView({ block: 'start', behavior: 'instant' })
-  revealTimer = setTimeout(moveEyeToCenter, fillTime)
+  revealTimer = setTimeout(moveEyeToCenter, delay)
 }
 
 function moveEyeToCenter () {
   if (intro.value !== 'done') finishIntro()
   clearTimeout(introTimer)
+  props.anchor?.scrollIntoView({ block: 'start', behavior: 'instant' })
   const bounds = field.value?.getBoundingClientRect()
   const eye = props.anchor?.querySelector('.archive-eye')?.getBoundingClientRect()
   if (!bounds || !eye?.width) {
@@ -347,10 +414,10 @@ async function flyWoltIntoBanner (returnEye: () => void) {
   phase.value = 'wolt'
   await nextTick()
 
-  const button = woltButton.value
+  const target = woltTarget.value
   const bounds = field.value?.getBoundingClientRect()
-  if (button && bounds && typeof button.animate === 'function') {
-    const slot = button.getBoundingClientRect()
+  if (target && bounds && typeof target.animate === 'function') {
+    const slot = target.getBoundingClientRect()
     const slotX = slot.left + slot.width / 2
     const slotY = slot.top + slot.height / 2
     const startX = bounds.left + vortex.value.x - slotX
@@ -359,7 +426,7 @@ async function flyWoltIntoBanner (returnEye: () => void) {
     const bounceX = startX * 0.58
     const arc = Math.min(110, Math.max(46, (floor - startY) * 0.32))
 
-    woltFlight = button.animate([
+    woltFlight = target.animate([
       { offset: 0, opacity: 0, transform: `translate(${startX}px, ${startY}px) scale(0.35)`, easing: 'ease-out' },
       { offset: 0.15, opacity: 1, transform: `translate(${startX + 28}px, ${startY - 26}px) rotate(22deg)`, easing: 'ease-in' },
       { offset: 0.48, opacity: 1, transform: `translate(${bounceX}px, ${floor}px) rotate(110deg) scale(1.1, 0.85)`, easing: 'ease-out' },
@@ -371,8 +438,8 @@ async function flyWoltIntoBanner (returnEye: () => void) {
 
     // Follow the falling icon only when it reaches the viewport's lower edge.
     function followIcon () {
-      if (!button || !woltFlying.value) return
-      const overflow = button.getBoundingClientRect().bottom - window.innerHeight
+      if (!target || !woltFlying.value) return
+      const overflow = target.getBoundingClientRect().bottom - window.innerHeight
       if (overflow > 0) window.scrollBy({ top: overflow, behavior: 'instant' })
       followFrame = requestAnimationFrame(followIcon)
     }
@@ -393,26 +460,37 @@ async function flyWoltIntoBanner (returnEye: () => void) {
 
   emit('eyeTravel', null)
   woltFlying.value = false
-  await nextTick()
-  button?.focus({ preventScroll: true })
+  await revealWoltResult()
 }
 
 async function showWolt () {
   phase.value = 'wolt'
+  await revealWoltResult()
+}
+
+async function revealWoltResult () {
+  if (preview.value) {
+    await openVoucher()
+    return
+  }
   await nextTick()
-  woltButton.value?.focus()
+  woltButton.value?.focus({ preventScroll: true })
 }
 
 async function openVoucher () {
-  voucherReference.value = `DEMO-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
+  const reference = `DEMO-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
+  if (preview.value) {
+    preview.value.voucher = reference
+  } else {
+    voucherReference.value = reference
+    saveProgress()
+  }
   phase.value = 'voucher'
-  saveProgress()
   await nextTick()
-  voucherTicket.value?.focus()
+  voucherTicket.value?.focus({ preventScroll: true })
 }
 
 async function startNextRound () {
-  refilled.value = false
   words.value = props.demo ? 0 : Math.max(0, words.value - demoGoal)
   clicks.value = 0
   lastAdded.value = 0
@@ -427,6 +505,7 @@ onBeforeUnmount(() => {
   observer?.disconnect()
   clearTimeout(introTimer)
   clearTimeout(revealTimer)
+  finishUploadColor?.()
   cancelAnimationFrame(followFrame)
   woltFlight?.cancel()
   emit('eyeTravel', null)
@@ -440,7 +519,7 @@ onBeforeUnmount(() => {
       <defs>
         <path id="panem-iris" d="M37 59c22-28 51-39 83-39 34 0 63 14 83 39-21 26-50 42-83 42-34 0-63-16-83-42Z"/>
         <circle id="panem-pupil" cx="125" cy="56" r="28"/>
-        <g id="panem-eye-lines" fill="none" stroke="#675e53" stroke-width="4">
+        <g id="panem-eye-lines" fill="none" stroke="var(--muted)" stroke-width="4">
           <path d="M120 4 233 60 120 116 7 60Z"/>
           <use href="#panem-iris"/>
           <use href="#panem-pupil"/>
@@ -448,10 +527,10 @@ onBeforeUnmount(() => {
           <path d="M18 60h9m186 0h9M130 45h13"/>
         </g>
         <g id="panem-eye-color">
-          <use href="#panem-iris" fill="#fd4e1f" />
-          <use href="#panem-pupil" fill="#382811" />
+          <use href="#panem-iris" fill="var(--brand-orange)" />
+          <use href="#panem-pupil" fill="var(--ink)" />
           <use href="#panem-eye-lines" />
-          <path fill="#f2f0ed" d="M130 42h13v5h-13z"/>
+          <path fill="var(--paper)" d="M130 42h13v5h-13z"/>
         </g>
       </defs>
     </svg>
@@ -459,7 +538,7 @@ onBeforeUnmount(() => {
     <div
       ref="field"
       class="eye-field"
-      :class="[intro, { swallowing: phase === 'swallowing', refilled, 'eyes-hidden': !showingProgress && !refilled }]"
+      :class="[intro, { swallowing: phase === 'swallowing', refilled: preview && showingProgress, 'eyes-hidden': !showingProgress }]"
       :style="{
         '--origin-x': source.x + '%',
         '--origin-y': source.y + '%',
@@ -479,7 +558,8 @@ onBeforeUnmount(() => {
           '--size': eye.size,
           '--delay': eye.delay + 'ms',
           '--unfilled': 100 - eyeFill(eye.fillOrder) + '%',
-          ...(refilled ? { '--refill-delay': refillDelay(eye.fillOrder) + 'ms' } : {}),
+          ...(uploadFill ? { '--upload-delay': uploadDelay(eye.fillOrder) + 'ms' } : {}),
+          ...(preview ? { '--refill-delay': refillDelay(eye.fillOrder) + 'ms' } : {}),
           ...(phase === 'swallowing'
             ? pullStyle(eye.x * fieldSize.width / 100, eye.y * fieldSize.height / 100, index)
             : {})
@@ -491,9 +571,9 @@ onBeforeUnmount(() => {
     </div>
 
     <div
-      v-if="intro === 'done' && (showingProgress || refilled) && formBox.width"
+      v-if="intro === 'done' && showingProgress && formBox.width"
       class="border-eye-field"
-      :class="{ swallowing: phase === 'swallowing', refilled }"
+      :class="{ swallowing: phase === 'swallowing', refilled: preview }"
       aria-hidden="true"
     >
       <svg
@@ -508,61 +588,70 @@ onBeforeUnmount(() => {
       </svg>
     </div>
 
-    <section v-if="rewardsEnabled" class="panem-banner" :class="{ 'is-swallowing': phase === 'swallowing' }" aria-labelledby="panem-title">
+    <section class="panem-banner" :class="{ 'is-swallowing': phase === 'swallowing' }" aria-labelledby="panem-title">
       <div class="panem-content">
         <h2 id="panem-title"><strong>Panem</strong> et circenses.</h2>
 
-        <div v-if="showingProgress" class="progress-card">
+        <div v-if="showingProgress && rewardsEnabled" class="progress-card">
           <div class="progress-label">
             <span>Words toward lunch</span>
             <strong>{{ format.format(Math.min(words, demoGoal)) }} <span>/ {{ format.format(demoGoal) }}</span></strong>
           </div>
           <progress :value="words" :max="demoGoal" aria-label="Words toward lunch" />
           <div v-if="demo" class="progress-actions">
-            <UButton ref="fillButton" size="sm" label="Fill the eyes" :disabled="phase !== 'collecting' || intro !== 'done'" @click="fillEyes" />
+            <UButton ref="fillButton" size="sm" label="Fill the eyes" :disabled="saving || phase !== 'collecting' || intro !== 'done'" @click="fillEyes" />
             <span>{{ clicks }} of {{ roundLength }} demo clicks</span>
-            <UButton class="replay-intro" size="sm" color="neutral" variant="outline" label="Replay intro" :disabled="phase !== 'collecting' || intro !== 'done'" @click="replayIntro" />
+            <UButton class="replay-intro" size="sm" color="neutral" variant="outline" label="Replay intro" :disabled="saving || phase !== 'collecting' || intro !== 'done'" @click="replayIntro" />
           </div>
           <p class="sr-only" role="status">
             {{ lastAdded ? '+' + format.format(lastAdded) + (demo ? ' demo words' : ' words from your document') : '' }}
           </p>
         </div>
 
+        <p v-else-if="showingProgress" class="panem-hint">Click the corner eye to preview the lunch reward.</p>
+
         <div v-else-if="phase === 'wolt'" class="wolt-reveal" :class="{ 'wolt-flying': woltFlying }">
-          <button ref="woltButton" class="wolt-button" type="button" :disabled="woltFlying" aria-label="Reveal your Wolt lunch voucher" @click="openVoucher">
-            <img src="/panem/wolt-disc.jpg" width="60" height="60" alt="">
-          </button>
-          <p>Click Wolt to reveal your lunch.</p>
+          <div ref="woltTarget" class="wolt-disc">
+            <img v-if="preview" src="/panem/wolt-disc.jpg" width="60" height="60" alt="Wolt">
+            <button v-else ref="woltButton" class="wolt-button" type="button" :disabled="woltFlying" aria-label="Reveal your Wolt lunch voucher" @click="openVoucher">
+              <img src="/panem/wolt-disc.jpg" width="60" height="60" alt="">
+            </button>
+          </div>
+          <p v-if="!preview">Click Wolt to reveal your lunch.</p>
         </div>
 
         <div v-else class="ticket-actions">
-          <a ref="voucherTicket" class="voucher-download" :href="voucherUrl" download title="Download sample voucher">
+          <img v-if="preview" class="wolt-disc ticket-wolt" src="/panem/wolt-disc.jpg" width="60" height="60" alt="Wolt">
+          <a ref="voucherTicket" class="voucher-download" :href="voucherUrl" download>
             <img
               :src="voucherUrl + '?preview=1'"
               width="900"
               height="460"
-              alt="Download sample voucher: One Lunch on Kaldi’s eyes."
+              alt="One Lunch on Kaldi’s eyes. Demo only."
             >
+            <span>Download sample coupon</span>
           </a>
-          <UButton color="neutral" variant="outline" label="Start another round" @click="startNextRound" />
+          <UButton v-if="preview && rewardsEnabled" color="neutral" variant="outline" label="Back to progress" @click="finishPreview" />
+          <UButton v-else-if="!preview" color="neutral" variant="outline" label="Start another round" @click="startNextRound" />
         </div>
 
       </div>
     </section>
 
     <button
+      ref="refillButton"
       class="refill-eyes"
       type="button"
       :disabled="!canRefill"
       aria-label="Refill the eyes"
       title="Refill the eyes"
-      @click="refilled = true"
+      @click="refillEyes"
     >
       <svg width="22" height="12" viewBox="0 0 240 120" aria-hidden="true">
         <use href="#panem-eye-lines" />
       </svg>
     </button>
-    <span v-if="phase === 'swallowing'" class="sr-only" role="status">All eyes filled. Revealing your lunch reward.</span>
+    <span v-if="phase === 'swallowing'" class="sr-only" role="status">{{ preview ? 'All eyes filled. Playing the ending animation.' : 'All eyes filled. Revealing your lunch reward.' }}</span>
   </div>
 </template>
 
@@ -587,9 +676,8 @@ onBeforeUnmount(() => {
 }
 .border-eye {
   position: absolute;
-  width: 28px;
   height: auto;
-  opacity: 0.62;
+  opacity: var(--rest-opacity);
   transform: translate(-50%, -50%) rotate(var(--angle));
 }
 
@@ -604,7 +692,7 @@ onBeforeUnmount(() => {
 }
 .eye-color {
   clip-path: inset(0 var(--unfilled) 0 0);
-  transition: clip-path 500ms ease;
+  transition: clip-path v-bind('eyeColorTime + "ms"') ease var(--upload-delay, 0ms);
 }
 .eyes-hidden .small-eye { visibility: hidden; }
 .refilled .eye-color {
@@ -647,7 +735,7 @@ onBeforeUnmount(() => {
 }
 
 @keyframes pull-into-eye {
-  0% { opacity: 1; }
+  0% { opacity: var(--rest-opacity, 1); }
   66% {
     opacity: 1;
     transform: translate(calc(-50% + var(--curve-x)), calc(-50% + var(--curve-y)))
@@ -671,7 +759,8 @@ onBeforeUnmount(() => {
   font-size: 0.8rem;
 }
 #panem-title { font-size: 1.125rem; line-height: 1.15; }
-#panem-title strong { color: #a83920; font-weight: inherit; }
+#panem-title strong { color: var(--warn); font-weight: inherit; }
+.panem-hint { margin: 0; color: var(--muted); }
 .progress-label, .progress-actions, .ticket-actions {
   display: flex;
   align-items: center;
@@ -685,7 +774,7 @@ progress {
   width: 100%;
   height: 0.3rem;
   margin: 0.2rem 0 0;
-  accent-color: #ac3e22;
+  accent-color: var(--accent);
 }
 .progress-actions { margin-top: 0.35rem; gap: 0.3rem 0.6rem; }
 .is-swallowing { background: transparent; border-color: transparent; visibility: hidden; }
@@ -694,14 +783,14 @@ progress {
   align-items: center;
   gap: 0.7rem;
 }
-.wolt-flying .wolt-button { position: relative; z-index: 4; opacity: 1; }
+.wolt-flying .wolt-disc { position: relative; z-index: 4; }
 .wolt-flying p { visibility: hidden; }
 .wolt-reveal p { margin: 0; color: var(--muted); }
 .wolt-button { padding: 0; border: 0; border-radius: 50%; background: transparent; }
-.wolt-button img { display: block; border-radius: inherit; }
+.wolt-disc img, .ticket-wolt { display: block; border-radius: 50%; }
 .wolt-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
 .ticket-actions { justify-content: flex-start; }
-.voucher-download { display: block; width: min(100%, 19rem); }
+.voucher-download { display: grid; gap: 0.3rem; width: min(100%, 19rem); color: var(--accent); }
 .voucher-download img { display: block; width: 100%; height: auto; }
 .voucher-download:hover, .voucher-download:focus-visible {
   outline: 2px solid var(--accent);

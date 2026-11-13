@@ -13,7 +13,7 @@ const route = useRoute()
 const rewardsEnabled = import.meta.dev
 const panemDemo = computed(() => rewardsEnabled && route.query.panem === '1')
 const replayIntro = computed(() => rewardsEnabled && route.query.intro === 'replay')
-const rewards = ref<{ creditDocument: (wordCount: number) => void } | null>(null)
+const rewards = ref<{ colorSavedDocument: (wordCount: number) => Promise<void>, ending: boolean } | null>(null)
 const feedEye = ref<HTMLElement | null>(null)
 const uploadForm = ref<HTMLFormElement | null>(null)
 const eyeTravel = ref<{ x: number, y: number, scale: number, returning: boolean, duration: number } | null>(null)
@@ -31,7 +31,11 @@ const author = ref('')
 const body = ref('')
 const convertFile = ref<File | null>(null)
 // Saving invalidates the cached Library list, so it shows the new document.
-const { mutateAsync: saveNewDocument, isLoading: saving, error: saveError, reset: dismissSaveError } = useSaveDocumentMutation()
+const { mutateAsync: saveNewDocument, isLoading: uploading, error: saveError, reset: dismissSaveError } = useSaveDocumentMutation()
+const openingLibrary = ref(false)
+const saving = computed(() => uploading.value || openingLibrary.value)
+const uploadLocked = computed(() => saving.value || Boolean(rewards.value?.ending))
+let leaving = false
 const saveMessage = ref('')
 // A 409 means this content is already in the archive; shown as a warning with a link.
 const duplicate = computed(() => duplicateOf(saveError.value))
@@ -137,7 +141,7 @@ function onDragEnter (event: DragEvent) {
 function onDragOver (event: DragEvent) {
   if (!hasFiles(event)) return
   event.preventDefault()
-  if (event.dataTransfer) event.dataTransfer.dropEffect = saving.value || formHidden.value ? 'none' : 'copy'
+  if (event.dataTransfer) event.dataTransfer.dropEffect = uploadLocked.value ? 'none' : 'copy'
 }
 
 function onDragLeave (event: DragEvent) {
@@ -149,7 +153,7 @@ function onDrop (event: DragEvent) {
   if (!hasFiles(event)) return
   event.preventDefault()
   dragDepth.value = 0
-  if (saving.value || formHidden.value) return
+  if (uploadLocked.value) return
   const files = Array.from(event.dataTransfer?.files || [])
   if (files.length === 0) return
   resetInput()
@@ -167,6 +171,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  leaving = true
   window.removeEventListener('dragenter', onDragEnter)
   window.removeEventListener('dragover', onDragOver)
   window.removeEventListener('dragleave', onDragLeave)
@@ -183,24 +188,22 @@ function requestBody () {
 }
 
 async function saveDocument () {
-  if (saving.value || formHidden.value) return
+  if (uploadLocked.value) return
   saveMessage.value = ''
   fileError.value = ''
   try {
     const saved = await saveNewDocument(requestBody())
-    if (rewardsEnabled && !panemDemo.value && rewards.value) {
-      rewards.value.creditDocument(saved.wordCount ?? 0)
-      clearFile()
-      title.value = ''
-      author.value = ''
-      body.value = ''
-      saveMessage.value = `Saved “${saved.title}” to the archive.`
-      return
-    }
+    if (leaving) return
+    openingLibrary.value = true
+    saveMessage.value = `Saved “${saved.title}” to the archive.`
+    await rewards.value?.colorSavedDocument(saved.wordCount)
+    if (leaving) return
     // Open the new document in the Library (its list is already invalidated).
     await navigateTo({ path: '/library', query: { document: saved.id } })
   } catch {
     // Shown from `saveError`. The form keeps its contents so nothing is lost.
+  } finally {
+    openingLibrary.value = false
   }
 }
 </script>
@@ -253,7 +256,7 @@ async function saveDocument () {
               : 'border-dashed border-default hover:border-primary hover:bg-primary/5'"
         >
           <!-- Visually hidden but still focusable, so keyboard users can open the picker. -->
-          <input ref="fileInput" class="pointer-events-none absolute size-px opacity-0" type="file" :accept="ACCEPT" :disabled="saving" @change="onFile">
+          <input ref="fileInput" class="pointer-events-none absolute size-px opacity-0" type="file" :accept="ACCEPT" :disabled="uploadLocked" @change="onFile">
           <UIcon :name="pickedName && !dragging ? 'i-lucide-file-check' : 'i-lucide-upload'" class="size-6" :class="pickedName && !dragging ? 'text-success' : 'text-primary'" />
           <template v-if="dragging">
             <strong>{{ pickedName ? 'Drop to replace the file' : 'Drop to add this file' }}</strong>
@@ -276,9 +279,10 @@ async function saveDocument () {
             type="submit"
             size="lg"
             :loading="saving"
-            :label="saving ? (convertFile ? 'Converting and saving…' : 'Saving…') : 'Save document'"
+            :disabled="uploadLocked"
+            :label="openingLibrary ? 'Opening Library…' : uploading ? (convertFile ? 'Converting and saving…' : 'Saving…') : 'Save document'"
           />
-          <UButton v-if="pickedName" color="neutral" variant="outline" size="lg" icon="i-lucide-x" label="Remove file" :disabled="saving" @click="clearFile" />
+          <UButton v-if="pickedName" color="neutral" variant="outline" size="lg" icon="i-lucide-x" label="Remove file" :disabled="uploadLocked" @click="clearFile" />
         </div>
         <p v-if="saveMessage" class="m-0 text-success" role="status">{{ saveMessage }}</p>
         <UAlert v-if="fileError" role="alert" color="error" variant="subtle" icon="i-lucide-file-x" :title="fileError" />
@@ -319,6 +323,7 @@ async function saveDocument () {
         :anchor="feedEye"
         :form="uploadForm"
         :rewards-enabled="rewardsEnabled"
+        :saving="saving"
         :demo="panemDemo"
         :replay="replayIntro"
         @eye-travel="eyeTravel = $event"

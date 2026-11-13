@@ -64,7 +64,9 @@ interface Recorded { body: { messages: Array<Record<string, unknown>>, tools: Ar
 
 function fakeFetch (responses: Array<() => Response>) {
   const calls: Recorded[] = []
-  const impl = (async (url: string, init: RequestInit) => {
+  // Like workerd's fetch: refuse to run as a method of some other object.
+  const impl = (async function (this: unknown, url: string, init: RequestInit) {
+    if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation: function called with incorrect `this` reference.')
     assert.equal(url, CHAT_ENDPOINT)
     calls.push({ body: JSON.parse(String(init.body)) })
     const next = responses.shift()
@@ -172,7 +174,18 @@ test('runChat throws an upstream error with the HTTP status', async () => {
     (error: unknown) => error instanceof ChatUpstreamError && error.status === 402
   )
   assert.equal(chatErrorMessage(new ChatUpstreamError(402, 'x')), 'The OpenRouter account is out of credits.')
-  assert.equal(chatErrorMessage(new Error('secret detail')), 'The answer could not be finished. Try again.')
+  assert.equal(chatErrorMessage(new TypeError('boom sk-or-123'), 'sk-or-123'), 'The answer could not be finished (TypeError: boom [redacted]). Try again.')
+})
+
+test('chat errors carry OpenRouter\'s reason, from the response or mid-stream', async () => {
+  const body = '{"error":{"message":"Provider returned error","code":502,"metadata":{"provider_name":"Anthropic","raw":"overloaded"}}}'
+  const http = fakeFetch([() => new Response(body, { status: 502 })])
+  const fromHttp = await runChat({ messages: [{ role: 'user', content: 'q' }], library: fakeLibrary(), env: {}, apiKey: 'k', model: 'm', origin: '', today: '2026-11-13', emit: () => {}, fetchImpl: http.impl }).catch(error => error)
+  assert.equal(chatErrorMessage(fromHttp), 'OpenRouter error 502. OpenRouter said: Provider returned error · provider Anthropic · overloaded')
+
+  const midStream = fakeFetch([stream([...textChunks('Partial'), { error: { message: 'No endpoints found', code: 404 } }])])
+  const fromStream = await runChat({ messages: [{ role: 'user', content: 'q' }], library: fakeLibrary(), env: {}, apiKey: 'k', model: 'm', origin: '', today: '2026-11-13', emit: () => {}, fetchImpl: midStream.impl }).catch(error => error)
+  assert.equal(chatErrorMessage(fromStream), 'The chat model rejected the request (404). OpenRouter said: No endpoints found')
 })
 
 test('toolMessageContent cuts long documents and marks errors', () => {

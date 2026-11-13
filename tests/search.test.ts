@@ -157,7 +157,9 @@ test('keyword search finds title and author with and without diacritics, and dat
 
   const topKs: number[] = []
   const env = envFor(sqlite, [
-    { id: 'chunk-meet', score: 0.99, metadata: { documentId: 'doc-meet', title: 'Sestanek', chunkIndex: 0 } }
+    { id: 'chunk-meet', score: 0.99, metadata: { documentId: 'doc-meet', title: 'Sestanek', chunkIndex: 0 } },
+    // Left in Vectorize after its document was deleted from D1.
+    { id: 'chunk-deleted', score: 0.98, metadata: { documentId: 'doc-deleted', title: 'Čokolada izbrisana', chunkIndex: 0 } }
   ], topKs)
   const restore = installEmbeddings()
   try {
@@ -166,6 +168,7 @@ test('keyword search finds title and author with and without diacritics, and dat
     assert.equal(folded.matches[0]?.documentId, 'doc-choco')
     assert.equal(folded.matches[0]?.author, 'Maja Župan')
     assert.ok(folded.matches.some(match => match.documentId === 'doc-note'))
+    assert.ok(folded.matches.every(match => match.documentId !== 'doc-deleted'), 'a deleted document must not come back from Vectorize')
 
     const accented = await searchDocuments(env, 'test-key', 'čokolada', 5)
     assert.equal(accented.matches[0]?.documentId, 'doc-choco')

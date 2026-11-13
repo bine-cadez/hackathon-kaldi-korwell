@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { extractFileText, FILE_MAX_BYTES, titleFromFilename } from '../server/utils/document-file.ts'
+import { extractFileText, FILE_MAX_BYTES, titleFromFilename, uploadedFileText } from '../server/utils/document-file.ts'
 import type { ConversionResult, MarkdownDocument, WorkersAI } from '../server/utils/env.ts'
 
 const bytes = (text: string) => new TextEncoder().encode(text)
@@ -106,4 +106,25 @@ test('files over the size cap are a 413', async () => {
     error => statusOf(error) === 413
   )
   assert.equal(calls.length, 0)
+})
+
+test('an edited body is kept only for a real .md or .txt upload', async () => {
+  const text = (value: string) => new TextEncoder().encode(value)
+  assert.equal(await uploadedFileText({ filename: 'notes.txt', data: text('original') }, 'edited', undefined), 'edited')
+  assert.equal(await uploadedFileText({ filename: 'notes.md', data: text('original') }, '  ', undefined), 'original')
+  // A body cannot smuggle an unsupported or binary file past validation.
+  await assert.rejects(
+    uploadedFileText({ filename: 'tool.exe', data: Uint8Array.of(0x4d, 0x5a, 0, 0) }, 'harmless text', undefined),
+    (error: { statusCode?: number }) => error.statusCode === 415
+  )
+  await assert.rejects(
+    uploadedFileText({ filename: 'notes.txt', data: Uint8Array.of(0x41, 0, 0x42) }, 'harmless text', undefined),
+    (error: { statusCode?: number }) => error.statusCode === 415
+  )
+  await assert.rejects(
+    uploadedFileText({ filename: 'big.txt', data: new Uint8Array(10 * 1024 * 1024 + 1) }, 'x', undefined),
+    (error: { statusCode?: number }) => error.statusCode === 413
+  )
+  // Other types still use the server's extraction, ignoring any body.
+  assert.equal(await uploadedFileText({ filename: 'a.csv', data: text('name\nAna') }, 'ignored', undefined), 'name: Ana')
 })

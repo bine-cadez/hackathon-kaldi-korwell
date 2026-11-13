@@ -4,6 +4,10 @@ const accessEmail = useState<string | null>('korwell-access-email', () => {
   return null
 })
 
+// Document pages (/library/<id>) belong to the Library section of the nav.
+const route = useRoute()
+const inLibrary = computed(() => route.path.startsWith('/library/'))
+
 useHead({
   link: [{ rel: 'icon', type: 'image/svg+xml', href: '/korwell-eye.svg?v=2' }]
 })
@@ -17,7 +21,7 @@ useHead({
       <nav aria-label="Main navigation">
         <NuxtLink to="/chat">Ask</NuxtLink>
         <NuxtLink to="/">Search</NuxtLink>
-        <NuxtLink to="/library">Library</NuxtLink>
+        <NuxtLink to="/library" :class="{ 'is-current-section': inLibrary }">Library</NuxtLink>
         <NuxtLink to="/feed">Add document</NuxtLink>
         <NuxtLink to="/connect">Connect Claude</NuxtLink>
       </nav>

@@ -48,6 +48,15 @@ test('csv uploads are converted without Workers AI', async () => {
   assert.equal(titleFromFilename('Stranke.CSV'), 'Stranke')
 })
 
+test('a Windows-1250 csv from Slovenian Excel keeps č, š and ž', async () => {
+  // "ime;kraj\nŽiga Čuk;Škofja Loka" in Windows-1250: Ž=0x8E, Č=0xC8, Š=0x8A.
+  const data = Uint8Array.from([
+    ...bytes('ime;kraj\n'), 0x8e, ...bytes('iga '), 0xc8, ...bytes('uk;'), 0x8a, ...bytes('kofja Loka')
+  ])
+  const text = await extractFileText({ filename: 'Stranke.csv', data }, undefined)
+  assert.equal(text, 'ime: Žiga Čuk; kraj: Škofja Loka')
+})
+
 test('a header-only csv is rejected with 422', async () => {
   await assert.rejects(
     extractFileText({ filename: 'empty.csv', data: bytes('name,city\n') }, undefined),

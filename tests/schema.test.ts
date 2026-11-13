@@ -34,7 +34,7 @@ test('the used-code migration creates the table the token endpoint writes to', a
   assert.equal(await store.consume('jti-2', exp), true)
 })
 
-function countingDb (migrated: { author: boolean, fts: boolean, source?: boolean }) {
+function countingDb (migrated: { author: boolean, fts: boolean, source?: boolean, titleSort?: boolean }) {
   const calls = { exec: 0, prepare: 0 }
   const db = {
     exec: async () => { calls.exec++ },
@@ -44,7 +44,13 @@ function countingDb (migrated: { author: boolean, fts: boolean, source?: boolean
         all: async () => {
           if (sql.startsWith('PRAGMA table_info(chunks)')) return { results: [{ name: 'embedding' }] }
           if (sql.startsWith('PRAGMA table_info(documents)')) {
-            return { results: [...(migrated.author ? [{ name: 'author' }] : []), ...(migrated.source ? [{ name: 'source_key' }] : [])] }
+            return {
+              results: [
+                ...(migrated.author ? [{ name: 'author' }] : []),
+                ...(migrated.source ? [{ name: 'source_key' }] : []),
+                ...(migrated.titleSort ? [{ name: 'title_sort' }] : [])
+              ]
+            }
           }
           return { results: migrated.fts ? [{ name: 'documents_fts' }] : [] }
         }
@@ -56,7 +62,7 @@ function countingDb (migrated: { author: boolean, fts: boolean, source?: boolean
 
 test('ensureSchema runs once per database binding', async () => {
   const { ensureSchema } = await import('../server/utils/schema.ts')
-  const { db, calls } = countingDb({ author: true, fts: true })
+  const { db, calls } = countingDb({ author: true, fts: true, source: true, titleSort: true })
   await Promise.all([ensureSchema(db), ensureSchema(db)])
   await ensureSchema(db)
   assert.equal(calls.exec, 3)
@@ -77,20 +83,25 @@ test('ensureSchema retries after a failure', async () => {
 
 test('search capabilities are cached only once fully migrated', async () => {
   const { readSearchCapabilities } = await import('../server/utils/capabilities.ts')
-  const { db, calls, migrated } = countingDb({ author: false, fts: false, source: false })
+  const { db, calls, migrated } = countingDb({ author: false, fts: false, source: false, titleSort: false })
+  const none = { author: false, fts: false, source: false, titleSort: false }
 
-  assert.deepEqual(await readSearchCapabilities(db), { author: false, fts: false, source: false })
-  assert.deepEqual(await readSearchCapabilities(db), { author: false, fts: false, source: false })
+  assert.deepEqual(await readSearchCapabilities(db), none)
+  assert.deepEqual(await readSearchCapabilities(db), none)
   assert.equal(calls.prepare, 4)
 
-  // 0002 alone is not fully migrated: 0005 can still arrive without a redeploy.
+  // 0002 alone is not fully migrated: 0005 and 0007 can still arrive without a redeploy.
   migrated.author = true
   migrated.fts = true
-  assert.deepEqual(await readSearchCapabilities(db), { author: true, fts: true, source: false })
+  assert.deepEqual(await readSearchCapabilities(db), { ...none, author: true, fts: true })
   assert.equal(calls.prepare, 6)
 
   migrated.source = true
-  assert.deepEqual(await readSearchCapabilities(db), { author: true, fts: true, source: true })
-  assert.deepEqual(await readSearchCapabilities(db), { author: true, fts: true, source: true })
+  assert.deepEqual(await readSearchCapabilities(db), { author: true, fts: true, source: true, titleSort: false })
   assert.equal(calls.prepare, 8)
+
+  migrated.titleSort = true
+  assert.deepEqual(await readSearchCapabilities(db), { author: true, fts: true, source: true, titleSort: true })
+  assert.deepEqual(await readSearchCapabilities(db), { author: true, fts: true, source: true, titleSort: true })
+  assert.equal(calls.prepare, 10)
 })

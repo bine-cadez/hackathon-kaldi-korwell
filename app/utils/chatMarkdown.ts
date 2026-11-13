@@ -17,7 +17,9 @@ function escapeHtml (text: string): string {
     .replace(/'/g, '&#39;')
 }
 
-const LIBRARY_LINK = /^\/library\?document=[\w-]+$/
+// A document page (/library/<id>), or the older /library?document=<id> form that
+// redirects there. The id pattern keeps paths and extra parameters out.
+const LIBRARY_LINK = /^\/library(?:\/[\w-]+|\?document=[\w-]+)$/
 
 export function safeHref (url: string, allowed: ReadonlySet<string> = new Set()): string | null {
   const href = url.trim()

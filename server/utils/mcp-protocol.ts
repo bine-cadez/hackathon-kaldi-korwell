@@ -196,7 +196,9 @@ export async function listTools (library: LibraryApi, env: unknown) {
 }
 
 export function documentUrl (origin: string, id: string): string {
-  return `${origin.replace(/\/$/, '')}/library?document=${encodeURIComponent(id)}`
+  // The document's own page. Older citations used /library?document=<id>; the
+  // Library page still redirects those here.
+  return `${origin.replace(/\/$/, '')}/library/${encodeURIComponent(id)}`
 }
 
 export const SNIPPET_CHARS = 600

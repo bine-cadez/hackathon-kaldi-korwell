@@ -4,7 +4,8 @@ import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import { EMBEDDING_DIMENSIONS } from '../server/utils/embeddings.ts'
 import type { DocDatabase, DocLibraryEnv, R2Bucket } from '../server/utils/env.ts'
-import { deleteDocument, getDocument, getDocumentSource, listDocuments, saveDocument } from '../server/utils/documents.ts'
+import { listDocuments } from '../server/utils/document-list.ts'
+import { deleteDocument, getDocument, getDocumentSource, saveDocument } from '../server/utils/documents.ts'
 import {
   contentDisposition,
   deleteDocumentObjects,
@@ -191,7 +192,7 @@ test('upload stores the original, the markdown, the uploader, and serves the ori
     assert.equal(document.uploadedBy, 'maja@kaldi.si')
     assert.equal(document.createdAt, saved.createdAt)
     assert.equal(document.source?.filename, 'Poročilo Q3.pdf')
-    const [listed] = await listDocuments(env)
+    const [listed] = (await listDocuments(env)).documents
     assert.equal(listed?.uploadedBy, 'maja@kaldi.si')
     assert.equal(listed?.source?.size, pdfBytes.byteLength)
 
@@ -261,7 +262,7 @@ test('before migration 0005 uploads still work and skip the new columns', async 
     const document = await getDocument(env, saved.id)
     assert.equal(document.uploadedBy, null)
     assert.equal(document.source, null)
-    assert.equal((await listDocuments(env))[0]?.source, null)
+    assert.equal((await listDocuments(env)).documents[0]?.source, null)
     await assert.rejects(() => getDocumentSource(env, saved.id), (error: unknown) => (error as { statusCode?: number }).statusCode === 404)
     await deleteDocument(env, saved.id)
   } finally {

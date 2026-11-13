@@ -1,5 +1,5 @@
 import type { AccessUser } from '../../utils/cloudflare-access'
-import { extractFileText, titleFromFilename } from '../../utils/document-file'
+import { titleFromFilename, uploadedFileText } from '../../utils/document-file'
 import { toSourceFile, type SourceFile } from '../../utils/document-storage'
 import { saveDocument } from '../../utils/documents'
 import { readCloudflareEnv, requireEnv, requireOpenRouterApiKey, toHttpError } from '../../utils/env'
@@ -18,20 +18,26 @@ async function readDocumentInput (event: Parameters<typeof readBody>[0]): Promis
     let title = ''
     let body = ''
     let author = ''
+    let fileName = ''
     let file: (typeof parts)[number] | undefined
     for (const part of parts) {
       const text = part.data.toString('utf8')
       if (part.name === 'title') title = text
       if (part.name === 'author') author = text
+      // Sent as its own field: h3 splits Content-Disposition on ";" and "=",
+      // so a name like "Q1; final=v2.pdf" would not survive part.filename.
+      if (part.name === 'fileName') fileName = text
       if (part.name === 'body' && !body) body = text
       if (part.name === 'file' && part.data.length > 0) file = part
     }
     if (file) {
-      // PDF, Word, and Excel files are converted to markdown by Workers AI.
-      body = await extractFileText(file, readCloudflareEnv(event)?.AI)
-      if (!title.trim() && file.filename) title = titleFromFilename(file.filename)
+      const named = { ...file, filename: fileName.trim() || file.filename }
+      // .md and .txt are read in the browser and may be edited before saving, so
+      // that text is kept. The file itself is still validated in every case.
+      body = await uploadedFileText(named, body, readCloudflareEnv(event)?.AI)
+      if (!title.trim() && named.filename) title = titleFromFilename(named.filename)
       // Kept in R2 next to the markdown so the original can be downloaded later.
-      return { title, body, author, source: toSourceFile(file) }
+      return { title, body, author, source: toSourceFile(named) }
     }
     return { title, body, author }
   }

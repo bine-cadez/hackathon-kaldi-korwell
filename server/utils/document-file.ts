@@ -1,8 +1,10 @@
 import { createError } from 'h3'
 import { csvToText } from './csv.ts'
+import { decodeTextBytes } from '../../shared/utils/text.ts'
 import type { ConversionResult, WorkersAI } from './env.ts'
 
-// Plain-text uploads are decoded as UTF-8. Everything in CONVERTIBLE_TYPES goes
+// Plain-text uploads are decoded as UTF-8, or Windows-1250 / ISO-8859-2 when the
+// bytes are not valid UTF-8 (shared/utils/text.ts). Everything in CONVERTIBLE_TYPES goes
 // through Workers AI toMarkdown first, so the rest of the pipeline only sees text.
 // CSV is decoded as text and then rewritten one row per paragraph (see csv.ts).
 export const TEXT_EXTENSIONS = ['md', 'markdown', 'txt', 'csv'] as const
@@ -53,7 +55,7 @@ export async function extractFileText (file: UploadedFile, ai: WorkersAI | undef
 }
 
 function decodeText (file: UploadedFile): string {
-  const text = new TextDecoder('utf-8').decode(file.data)
+  const { text } = decodeTextBytes(file.data)
   // A NUL byte means a binary format we do not convert (.doc, .pptx, images…).
   if (text.includes('\u0000')) {
     const supported = [...TEXT_EXTENSIONS, ...Object.keys(CONVERTIBLE_TYPES)].map(ext => `.${ext}`).join(', ')
@@ -97,4 +99,17 @@ async function convertToMarkdown (file: UploadedFile, ai: WorkersAI | undefined)
     fail(422, 'No text found in file', `No text found in ${name}. Scanned PDFs without a text layer are not supported.`)
   }
   return text
+}
+
+// Plain-text files the upload form reads itself (with encoding detection), so
+// the person can edit the text before saving.
+const BROWSER_TEXT_EXTENSIONS = ['md', 'markdown', 'txt']
+
+// The text to save for an uploaded file. The file is always validated here
+// (size, supported type, not binary), even when the form's own text is kept, so
+// a request cannot pair a body with an arbitrary file and have it stored.
+export async function uploadedFileText (file: UploadedFile, browserBody: string, ai: WorkersAI | undefined): Promise<string> {
+  const extracted = await extractFileText(file, ai)
+  const keepBrowserText = browserBody.trim() !== '' && BROWSER_TEXT_EXTENSIONS.includes(fileExtension(file.filename))
+  return keepBrowserText ? browserBody : extracted
 }

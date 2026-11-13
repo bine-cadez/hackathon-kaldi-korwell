@@ -116,7 +116,7 @@ async function removeDocument ({ confirmFirst = true } = {}) {
         @dismiss="dismissDeleteError()"
       />
 
-      <pre class="m-0 mt-6 max-w-[42rem] font-sans text-lg leading-relaxed font-light break-words whitespace-pre-wrap">{{ document.body }}</pre>
+      <pre class="m-0 mt-6 max-w-[42rem] font-sans text-lg leading-relaxed break-words whitespace-pre-wrap">{{ document.body }}</pre>
     </template>
 
     <template v-else-if="isPending">

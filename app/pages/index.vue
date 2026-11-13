@@ -269,7 +269,7 @@ onBeforeUnmount(() => {
           <UButton
             color="neutral"
             variant="outline"
-            class="bg-transparent font-light hover:bg-transparent hover:text-primary hover:ring-primary"
+            class="bg-transparent hover:bg-transparent hover:text-primary hover:ring-primary"
             :ui="{ label: 'whitespace-normal text-start' }"
             :label="suggestion"
             @click="ask(suggestion)"
@@ -279,12 +279,16 @@ onBeforeUnmount(() => {
     </section>
 
     <template v-else>
-      <ol class="flex-1" aria-live="polite">
-        <li v-for="pair in pairs" :key="pair.question.id" class="studio-section border-b border-default last:border-b-0">
-          <h2 class="self-start text-[1.6rem] leading-snug font-light whitespace-pre-wrap [overflow-wrap:anywhere] lg:sticky lg:top-6">{{ pair.question.text }}</h2>
+      <!-- One centred column, as in ChatGPT: your question is a bubble on the
+           right, Korwell's answer is plain text on the left. -->
+      <ol class="mx-auto grid w-[min(48rem,100%-2rem)] flex-1 content-start gap-10 pt-10 pb-6" aria-live="polite">
+        <li v-for="pair in pairs" :key="pair.question.id" class="grid gap-6">
+          <h2 class="ml-auto max-w-[min(80%,36rem)] rounded-3xl bg-accented px-5 py-2.5 font-sans text-[1.0625rem] leading-relaxed font-normal tracking-normal whitespace-pre-wrap text-highlighted [overflow-wrap:anywhere]">
+            <span class="sr-only">You asked: </span>{{ pair.question.text }}
+          </h2>
 
-          <article v-if="pair.answer" class="min-w-0 max-w-3xl" :aria-busy="pair.answer.status === 'streaming'">
-            <ul v-if="pair.answer.tools.length" class="mb-4 grid gap-1" aria-label="What Korwell looked up">
+          <article v-if="pair.answer" class="min-w-0" :aria-busy="pair.answer.status === 'streaming'">
+            <ul v-if="pair.answer.tools.length" class="mb-4 grid gap-1 text-sm" aria-label="What Korwell looked up">
               <li
                 v-for="tool in pair.answer.tools"
                 :key="tool.id"
@@ -315,7 +319,7 @@ onBeforeUnmount(() => {
 
             <ol
               v-if="pair.answer.status !== 'streaming' && citedSources(pair.answer).length"
-              class="mt-5 grid list-decimal gap-1.5 border-t border-default pt-4 pl-5 marker:font-semibold marker:text-primary"
+              class="mt-5 grid list-decimal gap-1.5 rounded-2xl border border-default py-3 pr-4 pl-9 text-sm marker:font-semibold marker:text-primary"
               aria-label="Sources"
             >
               <li v-for="source in citedSources(pair.answer)" :key="source.url" class="pl-1">
@@ -340,14 +344,13 @@ onBeforeUnmount(() => {
       </ol>
       <div ref="end" class="h-px" />
 
-      <div class="studio-section sticky bottom-0 items-end bg-linear-to-b from-transparent to-paper to-[1.25rem] pt-6 pb-5">
-        <UButton class="hidden justify-self-start uppercase lg:inline-flex" color="neutral" variant="outline" size="sm" icon="i-lucide-plus" label="New chat" @click="newChat" />
-        <div class="flex items-end gap-2">
-          <UButton class="lg:hidden" color="neutral" variant="outline" icon="i-lucide-plus" square aria-label="New chat" title="New chat" @click="newChat" />
+      <div class="sticky bottom-0 bg-linear-to-b from-transparent to-paper to-[1.5rem] pt-6 pb-5">
+        <div class="mx-auto flex w-[min(48rem,100%-2rem)] items-end gap-2">
+          <UButton color="neutral" variant="outline" size="xl" icon="i-lucide-plus" square class="mb-1.5 bg-default" aria-label="New chat" title="New chat" @click="newChat" />
           <ChatComposer
             ref="composer"
             v-model="draft"
-            class="max-w-3xl flex-1"
+            class="flex-1 shadow-[0_8px_30px_-18px_rgb(89_61_20/0.45)]"
             :streaming="streaming"
             placeholder="Ask a follow-up…"
             @submit="ask(draft)"

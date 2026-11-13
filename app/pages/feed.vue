@@ -356,7 +356,9 @@ async function saveDocument () {
             :rows="10"
             autoresize
             :maxrows="24"
+            size="lg"
             class="w-full"
+            :ui="{ base: 'px-5 py-4' }"
             :required="!convertFile"
             :disabled="Boolean(convertFile)"
             :placeholder="convertFile ? `Text will be extracted from ${convertFile.name} on save` : 'Paste markdown or plain text'"

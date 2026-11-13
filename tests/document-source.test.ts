@@ -7,6 +7,7 @@ import type { DocDatabase, DocLibraryEnv, R2Bucket } from '../server/utils/env.t
 import { listDocuments } from '../server/utils/document-list.ts'
 import { deleteDocument, getDocument, getDocumentSource, saveDocument } from '../server/utils/documents.ts'
 import {
+  contentDisposition,
   normalizeSourceFilename,
   sourceContentType,
   toSourceFile
@@ -122,6 +123,15 @@ test('download type comes from the extension, never from the browser', () => {
   assert.equal(sourceContentType('notes.md'), 'text/markdown; charset=utf-8')
   assert.equal(sourceContentType('page.html'), 'application/octet-stream')
   assert.equal(sourceContentType('noext'), 'application/octet-stream')
+})
+
+test('only PDFs are ever served inline for preview', () => {
+  // Text uploads accept any extension, so an .html or .svg original must stay a download.
+  assert.match(contentDisposition('Poročilo.pdf', { inline: true }), /^inline;/)
+  for (const name of ['page.html', 'logo.svg', 'notes.md', 'a.csv', 'a.xlsx', 'x.pdf.html']) {
+    assert.match(contentDisposition(name, { inline: true }), /^attachment;/, name)
+  }
+  assert.match(contentDisposition('Poročilo.pdf'), /^attachment;/)
 })
 
 test('filenames are reduced to a clean basename', () => {

@@ -58,9 +58,7 @@ export default defineEventHandler(async (event) => {
     // Set by the Cloudflare Access middleware after it verifies the JWT. Shared-password mode has no identity.
     const uploadedBy = (event.context.korwellAccessUser as AccessUser | undefined)?.email ?? null
     const saved = await saveDocument(requireEnv(event), requireOpenRouterApiKey(event), { ...input, uploadedBy })
-    if (!import.meta.dev) return saved
-
-    // Count the saved text for the local Panem preview, including converted files.
+    // Count the saved text, including text extracted from uploaded files.
     const wordCount = input.body.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0
     return { ...saved, wordCount }
   } catch (error) {

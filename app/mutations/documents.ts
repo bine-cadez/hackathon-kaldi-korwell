@@ -12,7 +12,7 @@ export interface SavedDocument {
   title: string
   chunkCount: number
   r2Key: string | null
-  wordCount?: number
+  wordCount: number
 }
 
 export function useSaveDocumentMutation () {

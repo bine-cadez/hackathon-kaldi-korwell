@@ -588,11 +588,11 @@ onBeforeUnmount(() => {
       </svg>
     </div>
 
-    <section v-if="rewardsEnabled || phase === 'wolt' || phase === 'voucher'" class="panem-banner" :class="{ 'is-swallowing': phase === 'swallowing' }" aria-labelledby="panem-title">
+    <section class="panem-banner" :class="{ 'is-swallowing': phase === 'swallowing' }" aria-labelledby="panem-title">
       <div class="panem-content">
         <h2 id="panem-title"><strong>Panem</strong> et circenses.</h2>
 
-        <div v-if="showingProgress" class="progress-card">
+        <div v-if="showingProgress && rewardsEnabled" class="progress-card">
           <div class="progress-label">
             <span>Words toward lunch</span>
             <strong>{{ format.format(Math.min(words, demoGoal)) }} <span>/ {{ format.format(demoGoal) }}</span></strong>
@@ -611,6 +611,8 @@ onBeforeUnmount(() => {
             {{ lastAdded ? '+' + format.format(lastAdded) + (demo ? ' demo words' : ' words from your document') : '' }}
           </p>
         </div>
+
+        <p v-else-if="showingProgress" class="panem-hint">Click the corner eye to preview the lunch reward.</p>
 
         <div v-else-if="phase === 'wolt'" class="wolt-reveal" :class="{ 'wolt-flying': woltFlying }">
           <div ref="woltTarget" class="wolt-disc">
@@ -762,6 +764,7 @@ onBeforeUnmount(() => {
 }
 #panem-title { font-size: 1.125rem; line-height: 1.15; }
 #panem-title strong { color: var(--warn); font-weight: inherit; }
+.panem-hint { margin: 0; color: var(--muted); }
 .progress-label, .progress-actions, .ticket-actions {
   display: flex;
   align-items: center;

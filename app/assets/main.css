@@ -413,3 +413,80 @@ textarea::placeholder {
 @media (max-width: 800px) {
   .slack-filters { grid-template-columns: 1fr; }
 }
+
+/* Loading placeholders (Library list and document body). */
+.skeleton {
+  display: block;
+  height: 0.8rem;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--line) 0%, var(--paper) 50%, var(--line) 100%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+.doc-skeleton > div { flex: 1; display: grid; gap: 0.45rem; }
+.skeleton-title { height: 1rem; }
+.skeleton-meta { width: 28%; height: 0.7rem; }
+.skeleton-button { width: 4.6rem; height: 2.2rem; flex: none; }
+.doc-body-skeleton { display: grid; gap: 0.6rem; margin-top: 1rem; }
+.result-skeleton { display: grid; gap: 0.55rem; justify-items: start; }
+.result-skeleton > .skeleton:not(.skeleton-button) { justify-self: stretch; }
+.skeleton-passage { display: grid; gap: 0.45rem; justify-self: stretch; margin: 0.3rem 0; padding: 0.75rem; border-radius: 10px; background: var(--paper); }
+
+.library-status { margin: 0; font-size: 0.85rem; }
+.doc-list button.link[aria-busy="true"] { cursor: progress; opacity: 0.7; }
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
+
+/* Error states (ErrorState.vue). */
+.error-state {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-top: 0.75rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line));
+  border-left: 4px solid var(--warn);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--warn) 6%, var(--card));
+  color: var(--ink);
+  text-align: start;
+}
+.error-state-icon { width: 1.35rem; height: 1.35rem; flex: none; margin-top: 0.1rem; color: var(--warn); }
+.error-state-text { flex: 1; min-width: 0; }
+.error-state-title { margin: 0; font-weight: 700; color: var(--warn); }
+.error-state-message { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.92rem; overflow-wrap: anywhere; }
+.error-state-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; flex: none; }
+.error-state-dismiss { border: 0; background: transparent; padding: 0.3rem; color: var(--muted); text-decoration: underline; text-underline-offset: 0.2em; }
+.error-state--compact { padding: 0.6rem 0.8rem; font-size: 0.92rem; }
+.error-state--compact .error-state-icon { width: 1.1rem; height: 1.1rem; }
+.error-state--compact button.ghost { padding: 0.35rem 0.75rem; }
+
+@media (max-width: 520px) {
+  .error-state { flex-wrap: wrap; }
+  .error-state-actions { width: 100%; padding-left: 2.1rem; }
+}
+
+/* Error page (app/error.vue). */
+.error-page { text-align: center; }
+.error-page .archive-eye { margin-inline: auto; }
+.error-page .error-code { margin: 0.5rem 0 0; color: var(--muted); font: 700 0.8rem/1.4 "Passenger Sans", sans-serif; letter-spacing: 0.2em; text-transform: uppercase; }
+.error-page .lede { max-width: 32rem; margin: 0.75rem auto 1.5rem; }
+
+.empty-state { display: grid; gap: 0.6rem; justify-items: start; margin-top: 0.5rem; }
+a.button-link {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.55rem 0.95rem;
+  color: var(--accent);
+  text-decoration: none;
+}
+a.button-link:hover { border-color: var(--accent); }

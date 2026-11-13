@@ -35,7 +35,8 @@ const toDate = ref('')
 const searching = ref(false)
 const searched = ref(false)
 const queryInvalid = ref(false)
-const searchError = ref('')
+// Raw error so ErrorState can tell a network failure from a server one.
+const searchError = ref<unknown>(null)
 const matches = ref<SlackHit[]>([])
 
 function author (hit: { userDisplayName: string, userRealName: string, isBot: boolean, userId: string | null }) {
@@ -62,7 +63,7 @@ async function runSearch () {
   queryInvalid.value = false
   searching.value = true
   searched.value = true
-  searchError.value = ''
+  searchError.value = null
   try {
     const result = await $fetch<{ matches: SlackHit[] }>('/api/slack/search', {
       method: 'POST',
@@ -78,7 +79,7 @@ async function runSearch () {
     matches.value = result.matches
   } catch (error) {
     matches.value = []
-    searchError.value = errorMessage(error)
+    searchError.value = error
   } finally {
     searching.value = false
   }
@@ -120,8 +121,11 @@ async function runSearch () {
     </form>
     <p v-if="queryInvalid" class="query-feedback" role="alert">Enter a search term or a channel, person, or date.</p>
     <section v-if="searched" class="search-results" aria-label="Slack results" :aria-busy="searching">
-      <p v-if="searching" role="status">Searching Slack…</p>
-      <p v-else-if="searchError" class="err" role="alert">{{ searchError }}</p>
+      <template v-if="searching">
+        <p role="status" class="sr-only">Searching Slack…</p>
+        <ResultSkeleton />
+      </template>
+      <ErrorState v-else-if="searchError" :error="searchError" title="Slack search didn’t finish" @retry="runSearch()" />
       <p v-else-if="!matches.length" role="status">No Slack messages matched.</p>
       <template v-else>
         <h2>From Slack</h2>

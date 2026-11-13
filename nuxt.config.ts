@@ -1,6 +1,9 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
   compatibilityDate: '2026-11-05',
+  // Pinia Colada caches API data (see app/composables/documents.ts) and hands the
+  // SSR cache to the client, so the first render does not fetch twice.
+  modules: ['@pinia/nuxt', '@pinia/colada-nuxt'],
   experimental: { viewTransition: true },
   devtools: { enabled: false },
   css: ['~/assets/main.css'],

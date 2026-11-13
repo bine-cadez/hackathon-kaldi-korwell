@@ -75,6 +75,8 @@ export interface DocLibraryEnv {
   BLOB?: R2Bucket
   AI?: WorkersAI
   OPENROUTER_API_KEY?: string
+  /** OpenRouter model id for /api/chat. Defaults to DEFAULT_CHAT_MODEL. */
+  CHAT_MODEL?: string
   SITE_PASSWORD?: string
   SLACK_SIGNING_SECRET?: string
   SLACK_BOT_TOKEN?: string

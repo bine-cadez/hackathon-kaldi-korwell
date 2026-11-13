@@ -199,17 +199,31 @@ export function documentUrl (origin: string, id: string): string {
   return `${origin.replace(/\/$/, '')}/library?document=${encodeURIComponent(id)}`
 }
 
-export function toSearchResults (origin: string, matches: LibraryMatch[], limit: number) {
+export const SNIPPET_CHARS = 600
+
+export interface CallToolOptions {
+  /** Add the best-matching passage to each search result. The in-app chat uses
+   * this to skip a fetch; the MCP output schema stays id, title, url. */
+  snippets?: boolean
+}
+
+export function toSearchResults (origin: string, matches: LibraryMatch[], limit: number, options: CallToolOptions = {}) {
   const seen = new Set<string>()
-  const results: Array<{ id: string, title: string, url: string }> = []
+  const results: Array<{ id: string, title: string, url: string, snippet?: string, author?: string, createdAt?: string }> = []
   for (const match of matches) {
     if (!match.documentId || seen.has(match.documentId)) continue
     seen.add(match.documentId)
-    results.push({
+    const result: (typeof results)[number] = {
       id: match.documentId,
       title: match.title || 'Untitled',
       url: documentUrl(origin, match.documentId)
-    })
+    }
+    if (options.snippets) {
+      if (match.content) result.snippet = match.content.slice(0, SNIPPET_CHARS)
+      if (match.author) result.author = match.author
+      if (match.createdAt) result.createdAt = match.createdAt.slice(0, 10)
+    }
+    results.push(result)
     if (results.length >= limit) break
   }
   return { results }
@@ -297,7 +311,8 @@ export async function callTool (
   apiKey: string,
   origin: string,
   name: string,
-  params: unknown
+  params: unknown,
+  options: CallToolOptions = {}
 ): Promise<ToolCallResult> {
   const args = argumentRecord(params)
   try {
@@ -316,7 +331,7 @@ export async function callTool (
       const topK = Math.min(20, Math.max(limit, limit * 3))
       const result = await library.searchDocuments(env, apiKey, query, topK, filters)
       console.log(JSON.stringify({ message: 'mcp_tool', tool: 'search', queryChars: query.length, matches: result.matches.length }))
-      return toolSuccess(toSearchResults(origin, result.matches, limit))
+      return toolSuccess(toSearchResults(origin, result.matches, limit, options))
     }
     if (name === 'fetch') {
       const id = textArg(args, 'id')

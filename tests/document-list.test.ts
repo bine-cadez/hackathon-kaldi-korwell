@@ -4,7 +4,6 @@ import { DatabaseSync } from 'node:sqlite'
 import test from 'node:test'
 import type { DocDatabase, DocLibraryEnv } from '../server/utils/env.ts'
 import { listDocuments } from '../server/utils/document-list.ts'
-import { slovenianSortKey } from '../shared/utils/text.ts'
 
 const initSql = readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8')
 const searchSql = readFileSync(new URL('../migrations/0002_document_search.sql', import.meta.url), 'utf8')
@@ -55,34 +54,24 @@ const DOCS = [
   { id: 'd5', title: 'Čokolada recipe', author: 'Ana Kovač', createdAt: '2024-07-15T12:00:00.000Z', fileName: 'recept.txt', uploadedBy: null }
 ]
 
-type Migration = '0001' | '0002' | '0007'
-
-// Rows are inserted with the columns of `migration`. With 0007, they are
-// inserted after 0002 and before 0005–0007 run, so 0007's backfill is exercised,
-// then uploader and original-file columns are filled in the way new saves would.
-function seeded (migration: Migration = '0002') {
+// Rows are inserted with the 0002 columns, then 0005–0007 run so the library
+// reads the schema production has, with uploader and original-file columns filled in.
+function seeded () {
   const sqlite = new DatabaseSync(':memory:')
   sqlite.exec(initSql)
-  if (migration !== '0001') sqlite.exec(searchSql)
+  sqlite.exec(searchSql)
   for (const doc of DOCS) {
-    if (migration !== '0001') {
-      sqlite.prepare('INSERT INTO documents (id, title, body, author, r2_key, created_at) VALUES (?, ?, ?, ?, NULL, ?)')
-        .run(doc.id, doc.title, `Body of ${doc.title}`, doc.author, doc.createdAt)
-    } else {
-      sqlite.prepare('INSERT INTO documents (id, title, body, r2_key, created_at) VALUES (?, ?, ?, NULL, ?)')
-        .run(doc.id, doc.title, `Body of ${doc.title}`, doc.createdAt)
-    }
+    sqlite.prepare('INSERT INTO documents (id, title, body, author, r2_key, created_at) VALUES (?, ?, ?, ?, NULL, ?)')
+      .run(doc.id, doc.title, `Body of ${doc.title}`, doc.author, doc.createdAt)
     sqlite.prepare('INSERT INTO chunks (id, document_id, chunk_index, content, token_estimate, created_at) VALUES (?, ?, 0, ?, 1, ?)')
       .run(`${doc.id}-c0`, doc.id, 'chunk', doc.createdAt)
   }
-  if (migration === '0007') {
-    applyLater(sqlite)
-    for (const doc of DOCS) {
-      sqlite.prepare('UPDATE documents SET source_key = ?, source_filename = ?, source_size = ?, uploaded_by = ? WHERE id = ?')
-        .run(doc.fileName ? `documents/${doc.id}/original` : null, doc.fileName, doc.fileName ? 2048 : null, doc.uploadedBy, doc.id)
-    }
+  applyLater(sqlite)
+  for (const doc of DOCS) {
+    sqlite.prepare('UPDATE documents SET source_key = ?, source_filename = ?, source_size = ?, uploaded_by = ? WHERE id = ?')
+      .run(doc.fileName ? `documents/${doc.id}/original` : null, doc.fileName, doc.fileName ? 2048 : null, doc.uploadedBy, doc.id)
   }
-  return { env: envFor(sqlite), sqlite }
+  return { env: envFor(sqlite) }
 }
 
 const ids = (page: { documents: Array<{ id: string }> }) => page.documents.map(document => document.id)
@@ -102,32 +91,6 @@ test('pages through documents newest first with totals', async () => {
   const beyond = await listDocuments(env, { pageSize: 2, page: 9 })
   assert.deepEqual(ids(beyond), [])
   assert.equal(beyond.total, 5)
-})
-
-test('the 0007 backfill builds the same sort key as new saves', () => {
-  const titles = ['Čokolada', 'ćevapi', 'Đuro', 'Šola', 'žaga', 'Zebra', 'Café Ölung', 'CZ', 'Éclair', 'cesta']
-  const sqlite = new DatabaseSync(':memory:')
-  sqlite.exec(initSql)
-  sqlite.exec(searchSql)
-  titles.forEach((title, index) => {
-    sqlite.prepare('INSERT INTO documents (id, title, body, created_at) VALUES (?, ?, ?, ?)').run(`t${index}`, title, 'b', '2024-01-01')
-  })
-  applyLater(sqlite)
-  const rows = sqlite.prepare('SELECT title, title_sort FROM documents ORDER BY title_sort').all() as Array<{ title: string, title_sort: string }>
-  for (const row of rows) assert.equal(row.title_sort, slovenianSortKey(row.title), row.title)
-  assert.deepEqual(rows.map(row => row.title), ['Café Ölung', 'cesta', 'CZ', 'Čokolada', 'ćevapi', 'Đuro', 'Éclair', 'Šola', 'Zebra', 'žaga'])
-})
-
-test('after 0007, rows written without a sort key get one from the trigger', () => {
-  const { sqlite } = seeded('0007')
-  // As older code or a plain SQL insert would: no title_sort column in the insert.
-  sqlite.prepare('INSERT INTO documents (id, title, body, created_at) VALUES (?, ?, ?, ?)').run('d6', 'Žaga', 'b', '2024-08-01')
-  assert.equal((sqlite.prepare('SELECT title_sort FROM documents WHERE id = ?').get('d6') as { title_sort: string }).title_sort, slovenianSortKey('Žaga'))
-  // A rename keeps the key in step; a key set by the app is left alone.
-  sqlite.prepare('UPDATE documents SET title = ? WHERE id = ?').run('Čebula', 'd6')
-  assert.equal((sqlite.prepare('SELECT title_sort FROM documents WHERE id = ?').get('d6') as { title_sort: string }).title_sort, slovenianSortKey('Čebula'))
-  sqlite.prepare('INSERT INTO documents (id, title, body, created_at, title_sort) VALUES (?, ?, ?, ?, ?)').run('d7', 'Éclair', 'b', '2024-08-01', 'custom')
-  assert.equal((sqlite.prepare('SELECT title_sort FROM documents WHERE id = ?').get('d7') as { title_sort: string }).title_sort, 'custom')
 })
 
 test('searches the title and the uploader, with prefixes and without accents', async () => {

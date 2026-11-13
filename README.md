@@ -83,6 +83,8 @@ Do not commit the password. Do not put it in `wrangler.jsonc` or in GitHub Actio
 
 The browser shows a password form on the first visit. A correct password sets an HttpOnly `site_auth` cookie (30 days). API clients send the same password as `Authorization: Bearer <password>` or `X-Site-Password: <password>`.
 
+The account menu at the right of the header links to **Profile** (`/profile`) and **Sign out**. `POST /api/auth/logout` expires the `site_auth` cookie. Behind Cloudflare Access it also sends the browser to `/cdn-cgi/access/logout`, which ends the Access session for this hostname. With Access, the profile page lists the documents you uploaded. With no lock, the menu is hidden.
+
 ```bash
 npx wrangler secret put SITE_PASSWORD
 ```

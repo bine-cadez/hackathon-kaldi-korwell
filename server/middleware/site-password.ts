@@ -58,18 +58,24 @@ export default defineEventHandler(async (event) => {
     if (pathname === '/api/auth/login') throw createError({ statusCode: 404 })
 
     event.context.korwellAccessUser = user
+    event.context.korwellAuth = 'cloudflare-access'
     return
   }
 
+  const sitePassword = sitePasswordFromEvent(event)
   const decision = await decideSiteAccess({
-    sitePassword: sitePasswordFromEvent(event),
+    sitePassword,
     method: event.method,
     pathname: url.pathname,
     cookie: getCookie(event, SITE_AUTH_COOKIE) ?? null,
     authorization: getHeader(event, 'authorization') ?? null,
     sitePasswordHeader: getHeader(event, 'x-site-password') ?? null
   })
-  if (decision === 'allow') return
+  if (decision === 'allow') {
+    // The header's account menu and /profile read this during SSR.
+    event.context.korwellAuth = sitePassword ? 'password' : 'open'
+    return
+  }
 
   setHeader(event, 'cache-control', 'no-store')
   setHeader(event, 'x-robots-tag', 'noindex, nofollow')

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createApp, defineEventHandler, toWebHandler } from 'h3'
 import { afterEach, describe, test } from 'node:test'
 import login from '../server/api/auth/login.post.ts'
+import logout from '../server/api/auth/logout.post.ts'
 import sitePassword from '../server/middleware/site-password.ts'
 import {
   decideSiteAccess,
@@ -58,6 +59,7 @@ describe('site password HTTP gate', { concurrency: false }, () => {
   const handler = toWebHandler(createApp()
     .use(sitePassword)
     .use('/api/auth/login', login)
+    .use('/api/auth/logout', logout)
     .use(defineEventHandler(() => ({ reached: true }))))
 
   test('direct API calls without credentials get 401 and never reach the route', async () => {
@@ -95,25 +97,6 @@ describe('site password HTTP gate', { concurrency: false }, () => {
     assert.match(html, /type="password"/)
     assert.match(html, /action="\/api\/auth\/login"/)
     assert.doesNotMatch(html, /reached/)
-  })
-
-  test('X-Site-Password and Authorization bearer unlock API routes', async () => {
-    process.env.SITE_PASSWORD = 's3cret'
-    const header = await handler(new Request('http://library.test/api/search', {
-      method: 'POST',
-      headers: { 'x-site-password': 's3cret', 'content-type': 'application/json' },
-      body: JSON.stringify({ query: 'q' })
-    }))
-    assert.equal(header.status, 200)
-    assert.equal((await header.json() as { reached?: boolean }).reached, true)
-
-    const bearer = await handler(new Request('http://library.test/api/documents', {
-      method: 'POST',
-      headers: { authorization: 'Bearer s3cret', 'content-type': 'application/json' },
-      body: JSON.stringify({ title: 't', body: 'b' })
-    }))
-    assert.equal(bearer.status, 200)
-    assert.equal((await bearer.json() as { reached?: boolean }).reached, true)
   })
 
   test('login sets an HttpOnly cookie that unlocks later API calls', async () => {

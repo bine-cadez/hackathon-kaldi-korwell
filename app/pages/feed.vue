@@ -285,8 +285,10 @@ async function saveDocument () {
           :style="eyeMotionStyle"
           :black-hole="eyeBlackHole"
         />
-        <h1 class="text-[clamp(2.2rem,5vw,2.9rem)] leading-tight font-light">Add a document</h1>
-        <p class="mx-auto mt-2 max-w-md text-lg text-muted">Once it’s saved, anyone can ask Korwell about it.</p>
+        <div class="mx-auto w-fit rounded-[2rem] bg-paper/92 px-6 py-3 backdrop-blur-sm">
+          <h1 class="text-[clamp(2.2rem,5vw,2.9rem)] leading-tight font-light">Add a document</h1>
+          <p class="mx-auto mt-2 max-w-md text-lg text-muted">Once it’s saved, anyone can ask Korwell about it.</p>
+        </div>
       </div>
       <form
         ref="uploadForm"
@@ -302,7 +304,7 @@ async function saveDocument () {
           :content="false"
           variant="link"
           class="justify-self-center"
-          :ui="{ list: 'border-b-0', trigger: 'uppercase font-light text-base px-0 mx-3' }"
+          :ui="{ list: 'border-b-0', trigger: 'tracking-wide uppercase text-base px-0 mx-3' }"
         />
 
         <label
@@ -432,9 +434,4 @@ async function saveDocument () {
   transition-timing-function: ease-in-out;
 }
 
-/* Keep the heading readable while the eyes swarm behind it. */
-.feed-heading :deep(:is(h1, p)) {
-  -webkit-text-stroke: 0.2em var(--paper);
-  paint-order: stroke fill;
-}
 </style>

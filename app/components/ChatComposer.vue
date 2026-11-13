@@ -20,8 +20,8 @@ function onKeydown (event: KeyboardEvent) {
   <form
     class="flex gap-2 border border-accented bg-default transition-shadow focus-within:border-kaldi-700 focus-within:ring-3 focus-within:ring-primary/20"
     :class="props.large
-      ? 'flex-col rounded-3xl py-3 pr-3 pl-5 shadow-[0_18px_40px_-26px_rgb(89_61_20/0.45)]'
-      : 'items-end rounded-[1.6rem] py-1.5 pr-1.5 pl-4'"
+      ? 'flex-col rounded-[1.75rem] pt-4 pr-3 pb-3 pl-5 shadow-[0_18px_40px_-26px_rgb(89_61_20/0.45)]'
+      : 'items-end rounded-[1.75rem] py-2 pr-2 pl-4'"
     @submit.prevent="emit('submit')"
   >
     <label class="sr-only" for="chat-input">Ask Korwell</label>
@@ -38,11 +38,11 @@ function onKeydown (event: KeyboardEvent) {
       size="xl"
       class="min-w-0 flex-1"
       :placeholder="placeholder"
-      :ui="{ base: 'resize-none px-0 text-lg font-light placeholder:text-dimmed' }"
+      :ui="{ base: 'resize-none px-1 text-[1.0625rem] leading-relaxed placeholder:text-dimmed' }"
       @keydown="onKeydown"
     />
     <div class="flex items-center gap-3 text-sm text-muted">
-      <span v-if="props.large">Searches documents and Slack</span>
+      <span v-if="props.large" class="ps-1">Searches documents and Slack</span>
       <UButton
         v-if="streaming"
         type="button"

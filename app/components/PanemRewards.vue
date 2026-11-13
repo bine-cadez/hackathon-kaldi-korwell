@@ -22,6 +22,7 @@ const woltFlightTime = 4000
 const fillTime = 550
 const eyeColorTime = 500
 const refillTime = 3600
+const uploadColorTime = 4000
 const vortex = ref({ x: 0, y: 0 })
 const woltFlying = ref(false)
 const format = new Intl.NumberFormat('en')
@@ -57,8 +58,9 @@ const clicks = ref(0)
 const lastAdded = ref(0)
 type RewardPhase = 'collecting' | 'full' | 'swallowing' | 'wolt' | 'voucher'
 const phase = ref<RewardPhase>('collecting')
-const preview = ref<{ previousPhase: RewardPhase, filledEyes: number } | null>(null)
+const preview = ref<{ previousPhase: RewardPhase, filledEyes: number, voucher: string } | null>(null)
 const uploadWords = ref(0)
+const uploadFill = ref<{ start: number, count: number } | null>(null)
 let finishUploadColor: (() => void) | undefined
 const showingProgress = computed(() => phase.value === 'collecting' || phase.value === 'full' || phase.value === 'swallowing')
 const refillStart = computed(() => preview.value?.filledEyes ?? (showingProgress.value ? (words.value + uploadWords.value) / wordsPerEye : 0))
@@ -66,10 +68,9 @@ const ending = computed(() => phase.value === 'full' || phase.value === 'swallow
 const canRefill = computed(() => intro.value === 'done' && !props.saving && !ending.value &&
   (!props.rewardsEnabled || !preview.value))
 const voucherReference = ref('')
-const voucherUrl = computed(() => '/api/demo/panem/' + voucherReference.value + '.svg')
+const voucherUrl = computed(() => '/api/demo/panem/' + (preview.value?.voucher ?? voucherReference.value) + '.svg')
 const fillButton = ref<HTMLButtonElement | null>(null)
 const refillButton = ref<HTMLButtonElement | null>(null)
-const previewDone = ref<HTMLButtonElement | null>(null)
 const woltTarget = ref<HTMLElement | null>(null)
 const woltButton = ref<HTMLButtonElement | null>(null)
 const voucherTicket = ref<HTMLAnchorElement | null>(null)
@@ -202,6 +203,13 @@ function refillDelay (fillOrder: number) {
   return Math.max(0, (fillOrder - refillStart.value) / remaining) * refillTime
 }
 
+function uploadDelay (fillOrder: number) {
+  const fill = uploadFill.value
+  if (!fill) return 0
+  const progress = Math.max(0, Math.min(1, (fillOrder - fill.start) / Math.max(1, fill.count - 1)))
+  return progress * (uploadColorTime - eyeColorTime)
+}
+
 onMounted(() => {
   measureField()
   if (field.value) {
@@ -303,6 +311,7 @@ async function colorSavedDocument (wordCount: number) {
   // Commit the starting color state before setting the new fill level.
   field.value?.getBoundingClientRect()
 
+  const start = refillStart.value
   if (props.rewardsEnabled && !props.demo) {
     lastAdded.value = wordCount
     words.value += wordCount
@@ -313,11 +322,14 @@ async function colorSavedDocument (wordCount: number) {
   }
 
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    const end = Math.min(eyeCount, refillStart.value)
+    uploadFill.value = { start: Math.floor(start), count: Math.ceil(end) - Math.floor(start) }
     await new Promise<void>((resolve) => {
       finishUploadColor = resolve
-      revealTimer = setTimeout(resolve, eyeColorTime + 150)
+      revealTimer = setTimeout(resolve, uploadColorTime + 100)
     })
     finishUploadColor = undefined
+    uploadFill.value = null
   }
 
   phase.value = previousPhase
@@ -327,7 +339,7 @@ defineExpose({ colorSavedDocument, ending })
 
 function refillEyes () {
   if (!canRefill.value) return
-  preview.value = { previousPhase: phase.value, filledEyes: showingProgress.value ? refillStart.value : 0 }
+  preview.value = { previousPhase: phase.value, filledEyes: showingProgress.value ? refillStart.value : 0, voucher: '' }
   revealReward(refillTime + eyeColorTime)
 }
 
@@ -440,26 +452,34 @@ async function flyWoltIntoBanner (returnEye: () => void) {
 
   emit('eyeTravel', null)
   woltFlying.value = false
-  await focusWoltResult()
+  await revealWoltResult()
 }
 
 async function showWolt () {
   phase.value = 'wolt'
-  await focusWoltResult()
+  await revealWoltResult()
 }
 
-async function focusWoltResult () {
+async function revealWoltResult () {
+  if (preview.value) {
+    await openVoucher()
+    return
+  }
   await nextTick()
-  const result = preview.value ? previewDone.value ?? refillButton.value : woltButton.value
-  result?.focus({ preventScroll: true })
+  woltButton.value?.focus({ preventScroll: true })
 }
 
 async function openVoucher () {
-  voucherReference.value = `DEMO-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
+  const reference = `DEMO-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
+  if (preview.value) {
+    preview.value.voucher = reference
+  } else {
+    voucherReference.value = reference
+    saveProgress()
+  }
   phase.value = 'voucher'
-  saveProgress()
   await nextTick()
-  voucherTicket.value?.focus()
+  voucherTicket.value?.focus({ preventScroll: true })
 }
 
 async function startNextRound () {
@@ -491,7 +511,7 @@ onBeforeUnmount(() => {
       <defs>
         <path id="panem-iris" d="M37 59c22-28 51-39 83-39 34 0 63 14 83 39-21 26-50 42-83 42-34 0-63-16-83-42Z"/>
         <circle id="panem-pupil" cx="125" cy="56" r="28"/>
-        <g id="panem-eye-lines" fill="none" stroke="#675e53" stroke-width="4">
+        <g id="panem-eye-lines" fill="none" stroke="var(--muted)" stroke-width="4">
           <path d="M120 4 233 60 120 116 7 60Z"/>
           <use href="#panem-iris"/>
           <use href="#panem-pupil"/>
@@ -499,10 +519,10 @@ onBeforeUnmount(() => {
           <path d="M18 60h9m186 0h9M130 45h13"/>
         </g>
         <g id="panem-eye-color">
-          <use href="#panem-iris" fill="#fd4e1f" />
-          <use href="#panem-pupil" fill="#382811" />
+          <use href="#panem-iris" fill="var(--brand-orange)" />
+          <use href="#panem-pupil" fill="var(--ink)" />
           <use href="#panem-eye-lines" />
-          <path fill="#f2f0ed" d="M130 42h13v5h-13z"/>
+          <path fill="var(--paper)" d="M130 42h13v5h-13z"/>
         </g>
       </defs>
     </svg>
@@ -530,6 +550,7 @@ onBeforeUnmount(() => {
           '--size': eye.size,
           '--delay': eye.delay + 'ms',
           '--unfilled': 100 - eyeFill(eye.fillOrder) + '%',
+          ...(uploadFill ? { '--upload-delay': uploadDelay(eye.fillOrder) + 'ms' } : {}),
           ...(preview ? { '--refill-delay': refillDelay(eye.fillOrder) + 'ms' } : {}),
           ...(phase === 'swallowing'
             ? pullStyle(eye.x * fieldSize.width / 100, eye.y * fieldSize.height / 100, index)
@@ -559,7 +580,7 @@ onBeforeUnmount(() => {
       </svg>
     </div>
 
-    <section v-if="rewardsEnabled || phase === 'wolt'" class="panem-banner" :class="{ 'is-swallowing': phase === 'swallowing' }" aria-labelledby="panem-title">
+    <section v-if="rewardsEnabled || phase === 'wolt' || phase === 'voucher'" class="panem-banner" :class="{ 'is-swallowing': phase === 'swallowing' }" aria-labelledby="panem-title">
       <div class="panem-content">
         <h2 id="panem-title"><strong>Panem</strong> et circenses.</h2>
 
@@ -590,23 +611,22 @@ onBeforeUnmount(() => {
               <img src="/panem/wolt-disc.jpg" width="60" height="60" alt="">
             </button>
           </div>
-          <template v-if="preview">
-            <p>Animation preview</p>
-            <button v-if="rewardsEnabled && !woltFlying" ref="previewDone" type="button" class="ghost" @click="finishPreview">Back to progress</button>
-          </template>
-          <p v-else>Click Wolt to reveal your lunch.</p>
+          <p v-if="!preview">Click Wolt to reveal your lunch.</p>
         </div>
 
         <div v-else class="ticket-actions">
-          <a ref="voucherTicket" class="voucher-download" :href="voucherUrl" download title="Download sample voucher">
+          <img v-if="preview" class="wolt-disc ticket-wolt" src="/panem/wolt-disc.jpg" width="60" height="60" alt="Wolt">
+          <a ref="voucherTicket" class="voucher-download" :href="voucherUrl" download>
             <img
               :src="voucherUrl + '?preview=1'"
               width="900"
               height="460"
-              alt="Download sample voucher: One Lunch on Kaldi’s eyes."
+              alt="One Lunch on Kaldi’s eyes. Demo only."
             >
+            <span>Download sample coupon</span>
           </a>
-          <button type="button" class="ghost" @click="startNextRound">Start another round</button>
+          <button v-if="preview && rewardsEnabled" type="button" class="ghost" @click="finishPreview">Back to progress</button>
+          <button v-else-if="!preview" type="button" class="ghost" @click="startNextRound">Start another round</button>
         </div>
 
       </div>
@@ -667,7 +687,7 @@ onBeforeUnmount(() => {
 }
 .eye-color {
   clip-path: inset(0 var(--unfilled) 0 0);
-  transition: clip-path v-bind('eyeColorTime + "ms"') ease;
+  transition: clip-path v-bind('eyeColorTime + "ms"') ease var(--upload-delay, 0ms);
 }
 .eyes-hidden .small-eye { visibility: hidden; }
 .refilled .eye-color {
@@ -734,7 +754,7 @@ onBeforeUnmount(() => {
   font-size: 0.8rem;
 }
 #panem-title { font-size: 1.125rem; line-height: 1.15; }
-#panem-title strong { color: #a83920; font-weight: inherit; }
+#panem-title strong { color: var(--warn); font-weight: inherit; }
 .progress-label, .progress-actions, .ticket-actions {
   display: flex;
   align-items: center;
@@ -748,7 +768,7 @@ progress {
   width: 100%;
   height: 0.3rem;
   margin: 0.2rem 0 0;
-  accent-color: #ac3e22;
+  accent-color: var(--accent);
 }
 .progress-actions { margin-top: 0.35rem; gap: 0.3rem 0.6rem; }
 .progress-actions button { padding: 0.25rem 0.65rem; }
@@ -762,10 +782,10 @@ progress {
 .wolt-flying p { visibility: hidden; }
 .wolt-reveal p { margin: 0; color: var(--muted); }
 .wolt-button { padding: 0; border: 0; border-radius: 50%; background: transparent; }
-.wolt-disc img { display: block; border-radius: 50%; }
+.wolt-disc img, .ticket-wolt { display: block; border-radius: 50%; }
 .wolt-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 5px; }
 .ticket-actions { justify-content: flex-start; }
-.voucher-download { display: block; width: min(100%, 19rem); }
+.voucher-download { display: grid; gap: 0.3rem; width: min(100%, 19rem); color: var(--accent); }
 .voucher-download img { display: block; width: 100%; height: auto; }
 .voucher-download:hover, .voucher-download:focus-visible {
   outline: 2px solid var(--accent);

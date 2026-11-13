@@ -9,5 +9,10 @@ SITE_PASSWORD=
 ACCESS_TEAM_DOMAIN=
 ACCESS_AUD=
 
+# Slack archive. Empty = events route returns not configured. See README.
+SLACK_SIGNING_SECRET=
+SLACK_BOT_TOKEN=
+SLACK_CHANNEL_IDS=
+
 # Signs MCP OAuth tokens. At least 32 characters. Empty disables /mcp (503).
 MCP_SIGNING_KEY=

@@ -49,6 +49,10 @@ export function isPublicRoute (method: string, pathname: string): boolean {
   return verb === 'POST' && path === '/api/auth/login'
 }
 
+export function isSlackEventsRoute (method: string, pathname: string): boolean {
+  return method.toUpperCase() === 'POST' && normalizePathname(pathname) === '/api/slack/events'
+}
+
 export function passwordFromAuthorization (authorization: string | null | undefined): string {
   if (!authorization) return ''
   const match = /^\s*Bearer\s+(\S.*?)\s*$/i.exec(authorization)

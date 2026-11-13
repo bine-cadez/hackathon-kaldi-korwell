@@ -6,8 +6,16 @@
   // https://developers.cloudflare.com/workers/versions-and-deployments/version-urls/
   "preview_urls": true,
   // Optional gate: `npx wrangler secret put SITE_PASSWORD` (unset = unlocked).
+  // Do not put the password in this file. Cloudflare Access can replace the
+  // in-app gate later. Wrangler has no portable Access block (it needs your
+  // Zero Trust account). After deploy, open Workers & Pages → doc-library →
+  // Access, protect this Worker, and choose all traffic.
+  // Slack cannot send an Access JWT. Add one Access Bypass policy for
+  // POST /api/slack/events only. The route checks X-Slack-Signature.
+  // Do not bypass /api/slack/search or /api/slack/backfill.
+  // Secrets (not vars): SLACK_SIGNING_SECRET, SLACK_BOT_TOKEN, SLACK_CHANNEL_IDS.
   // MCP OAuth: `npx wrangler secret put MCP_SIGNING_KEY` (at least 32 characters).
-  // Do not put either value in this file. /mcp, /token, /register, and
+  // Do not put it in this file either. /mcp, /token, /register, and
   // /.well-known/oauth-* must be Access Bypass paths. /authorize must stay
   // behind Access. See the README.
   // https://developers.cloudflare.com/workers/configuration/cloudflare-access/

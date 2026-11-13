@@ -1,12 +1,8 @@
+import type { SearchFilters } from './search.ts'
+
 export const PROTOCOL_VERSIONS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'] as const
 export const DEFAULT_PROTOCOL_VERSION = '2025-06-18'
 const SERVER_INSTRUCTIONS = 'Korwell document library, read-only. Call search with a natural-language query, then fetch with a result id to read the full text. search also accepts optional limit, from, to, and author. Do not invent ids. There are no tools that create, edit, or delete anything.'
-
-export interface SearchFilters {
-  from?: string
-  to?: string
-  author?: string
-}
 
 export interface LibraryMatch {
   documentId: string
@@ -42,6 +38,8 @@ export interface SlackHitView {
   userDisplayName: string
   text: string
   permalink: string | null
+  deleted?: boolean
+  deletedAt?: string | null
 }
 
 export type SlackSearchFn = (
@@ -123,7 +121,7 @@ function searchTool () {
   return {
     name: 'search',
     title: 'Search documents',
-    description: 'Search the Korwell document library. Pass a natural-language query. Optional limit (1-20), from and to (inclusive UTC dates YYYY-MM-DD), and author narrow the same search. Returns documents, not chunks. Call fetch with a result id for the full text.',
+    description: 'Search the Korwell document library. Pass a natural-language query, or an author. Optional limit (1-20), from and to (inclusive UTC dates YYYY-MM-DD), and author narrow the same search; dates alone are not enough. Returns documents, not chunks. Call fetch with a result id for the full text.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -309,7 +307,8 @@ export async function callTool (
       if (from) filters.from = from
       if (to) filters.to = to
       if (author) filters.author = author
-      if (!query && !from && !to && !author) return toolFailure('query is required')
+      // Document search needs words or an author; a date range only narrows them.
+      if (!query && !author) return toolFailure('query or author is required')
       const topK = Math.min(20, Math.max(limit, limit * 3))
       const result = await library.searchDocuments(env, apiKey, query, topK, filters)
       console.log(JSON.stringify({ message: 'mcp_tool', tool: 'search', queryChars: query.length, matches: result.matches.length }))
@@ -340,7 +339,11 @@ export async function callTool (
         title: `#${hit.channelName} · ${hit.userDisplayName || 'unknown'}`,
         text: hit.text,
         url: hit.permalink || '',
-        sentAt: hit.sentAt
+        sentAt: hit.sentAt,
+        // Deleted messages stay in the archive; say so, so the model does not
+        // quote them as current.
+        deleted: Boolean(hit.deleted),
+        deletedAt: hit.deletedAt ?? null
       }))
       console.log(JSON.stringify({ message: 'mcp_tool', tool: 'search_slack', queryChars: query.length, matches: results.length }))
       return toolSuccess({ results })

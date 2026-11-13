@@ -1,4 +1,5 @@
-import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from './embeddings'
+import { createError } from 'h3'
+import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from './embeddings.ts'
 
 export interface D1Statement {
   bind (...values: unknown[]): D1Statement
@@ -45,10 +46,25 @@ export interface DocLibraryEnv {
   BLOB?: R2Bucket
   OPENROUTER_API_KEY?: string
   SITE_PASSWORD?: string
+  SLACK_SIGNING_SECRET?: string
+  SLACK_BOT_TOKEN?: string
+  SLACK_CHANNEL_IDS?: string
 }
 
 export function readCloudflareEnv (event: { context: { cloudflare?: { env?: DocLibraryEnv } } }): DocLibraryEnv | undefined {
   return event.context.cloudflare?.env
+}
+
+export function requireDatabase (event: { context: { cloudflare?: { env?: DocLibraryEnv } } }): DocDatabase {
+  const db = readCloudflareEnv(event)?.DB
+  if (!db) {
+    throw createError({
+      statusCode: 503,
+      statusMessage: 'D1 binding is unavailable',
+      data: { message: 'DB binding is missing. Run npm run dev or deploy the Worker after creating the D1 database.' }
+    })
+  }
+  return db
 }
 
 export function requireEnv (event: { context: { cloudflare?: { env?: DocLibraryEnv } } }): DocLibraryEnv {

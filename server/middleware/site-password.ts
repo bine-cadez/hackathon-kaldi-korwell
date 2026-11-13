@@ -4,6 +4,7 @@ import { isMcpMachineRoute } from '../utils/mcp-routes.ts'
 import {
   decideSiteAccess,
   isPublicRoute,
+  isSlackEventsRoute,
   loginFormHtml,
   normalizePathname,
   SITE_AUTH_COOKIE,
@@ -15,6 +16,10 @@ export default defineEventHandler(async (event) => {
   const url = getRequestURL(event)
   const pathname = normalizePathname(url.pathname)
   const method = event.method.toUpperCase()
+  // Slack cannot present a Cloudflare Access JWT or the site password.
+  // Signature verification on this route is the lock. Every other path stays gated,
+  // including /api/slack/search and /api/slack/backfill.
+  if (isSlackEventsRoute(method, pathname)) return
 
   const access = accessConfig(event)
 

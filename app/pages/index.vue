@@ -3,6 +3,8 @@ interface SearchMatch {
   chunkId: string
   documentId: string
   title: string
+  author?: string | null
+  createdAt?: string | null
   chunkIndex: number
   content: string
   score: number
@@ -11,6 +13,7 @@ interface SearchMatch {
 interface DocumentDetail {
   id: string
   title: string
+  author?: string | null
   body: string
   createdAt: string
   r2Key: string | null
@@ -58,7 +61,12 @@ const sampleNotes = [
   ['Retrospective', 'The team wants to keep the weekly demos and document decisions earlier. Follow-up actions will be reviewed at the next planning session.']
 ]
 
+const corpus = ref<'documents' | 'slack'>('documents')
 const query = ref('')
+const fromDate = ref('')
+const toDate = ref('')
+const titleFilter = ref('')
+const authorFilter = ref('')
 const archiveEye = ref<{ lookAt: (x: number, y: number) => void } | null>(null)
 const queryInput = ref<HTMLInputElement | null>(null)
 const queryInvalid = ref(false)
@@ -106,9 +114,16 @@ function clearQuery () {
   followCaret()
 }
 
+function clearFilters () {
+  fromDate.value = ''
+  toDate.value = ''
+  titleFilter.value = ''
+  authorFilter.value = ''
+}
+
 async function runSearch () {
   if (searching.value) return
-  if (!query.value.trim()) {
+  if (!query.value.trim() && !titleFilter.value.trim() && !authorFilter.value.trim()) {
     queryInvalid.value = true
     queryInput.value?.focus()
     return
@@ -134,7 +149,14 @@ async function runSearch () {
     }
     const result = await $fetch<{ matches: SearchMatch[] }>('/api/search', {
       method: 'POST',
-      body: { query: query.value, topK: 5 }
+      body: {
+        query: query.value,
+        topK: 5,
+        from: fromDate.value || undefined,
+        to: toDate.value || undefined,
+        title: titleFilter.value || undefined,
+        author: authorFilter.value || undefined
+      }
     })
     matches.value = result.matches
   } catch (error) {
@@ -159,29 +181,56 @@ async function openDocument (id: string) {
 <template>
   <main class="search-page">
     <section class="search-hero" aria-labelledby="korwell-title">
-      <ArchiveEye ref="archiveEye" :searching="searching" :no-results="searched && !searching && !searchError && !matches.length" />
+      <ArchiveEye ref="archiveEye" :searching="searching" :no-results="corpus === 'documents' && searched && !searching && !searchError && !matches.length" />
       <p class="eyebrow archive-quote"><q v-if="archiveQuote">{{ archiveQuote }}</q></p>
       <h1 id="korwell-title">Korwell</h1>
-      <form class="search-bar" role="search" novalidate @submit.prevent="runSearch">
-        <label class="sr-only" for="archive-query">Search the records</label>
-        <input id="archive-query" ref="queryInput" v-model="query" :aria-invalid="queryInvalid || undefined" :aria-describedby="queryInvalid ? 'archive-query-error' : undefined" @input="queryInvalid = false; followCaret()" @focus="followCaret" @click="followCaret" @keyup="followCaret" type="text" inputmode="search" enterkeyhint="search" name="query" required placeholder="Search the records…">
-        <button v-if="query" class="clear-search" type="button" aria-label="Clear search" title="Clear search" @click="clearQuery">
-          <svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true">
-            <path d="m6 6 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
-          </svg>
-        </button>
-        <button class="search-submit" type="submit" :disabled="searching" :aria-label="searching ? 'Searching…' : 'Search'" title="Search">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <circle cx="10.5" cy="10.5" r="5.5" stroke="currentColor" stroke-width="2"/>
-            <path d="m15 15 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-          </svg>
-        </button>
+      <div class="corpus-tabs" role="tablist" aria-label="What to search">
+        <button type="button" role="tab" :aria-selected="corpus === 'documents'" @click="corpus = 'documents'">Documents</button>
+        <button type="button" role="tab" :aria-selected="corpus === 'slack'" @click="corpus = 'slack'">Slack</button>
+      </div>
+      <SlackSearch v-if="corpus === 'slack'" />
+      <form v-else class="search-form" role="search" novalidate @submit.prevent="runSearch">
+        <div class="search-bar">
+          <label class="sr-only" for="archive-query">Search the records</label>
+          <input id="archive-query" ref="queryInput" v-model="query" :aria-invalid="queryInvalid || undefined" :aria-describedby="queryInvalid ? 'archive-query-error' : undefined" @input="queryInvalid = false; followCaret()" @focus="followCaret" @click="followCaret" @keyup="followCaret" type="text" inputmode="search" enterkeyhint="search" name="query" placeholder="Search the records…">
+          <button v-if="query" class="clear-search" type="button" aria-label="Clear search" title="Clear search" @click="clearQuery">
+            <svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true">
+              <path d="m6 6 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+            </svg>
+          </button>
+          <button class="search-submit" type="submit" :disabled="searching" :aria-label="searching ? 'Searching…' : 'Search'" title="Search">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <circle cx="10.5" cy="10.5" r="5.5" stroke="currentColor" stroke-width="2"/>
+              <path d="m15 15 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
+        <div class="search-filters">
+          <label>
+            From
+            <input v-model="fromDate" type="date" name="from">
+          </label>
+          <label>
+            To
+            <input v-model="toDate" type="date" name="to">
+          </label>
+          <label>
+            Title
+            <input v-model="titleFilter" type="text" name="title" maxlength="200" placeholder="Words in the title">
+          </label>
+          <label>
+            Author
+            <input v-model="authorFilter" type="text" name="author" maxlength="200" placeholder="Words in the author">
+          </label>
+          <button v-if="fromDate || toDate || titleFilter || authorFilter" class="clear-filters" type="button" @click="clearFilters">Clear filters</button>
+        </div>
+        <p class="meta search-filter-note">Dates include the whole day, in UTC.</p>
       </form>
-      <p v-if="queryInvalid" id="archive-query-error" class="query-feedback" role="alert">Enter a search term to look through the archive.</p>
+      <p v-if="corpus === 'documents' && queryInvalid" id="archive-query-error" class="query-feedback" role="alert">Enter a search term, a title, or an author.</p>
       <p v-if="preview" class="meta">Design preview · sample documents</p>
     </section>
 
-    <section v-if="searched" class="search-results" aria-label="Search results" :aria-busy="searching">
+    <section v-if="corpus === 'documents' && searched" class="search-results" aria-label="Search results" :aria-busy="searching">
       <p v-if="searching" role="status">Searching the archive…</p>
       <p v-else-if="searchError" class="err" role="alert">{{ searchError }}</p>
       <p v-else-if="!matches.length" role="status">No matching passages found. Try a different search.</p>
@@ -190,6 +239,9 @@ async function openDocument (id: string) {
         <ol class="results">
           <li v-for="match in matches" :key="match.chunkId" class="result">
             <h3>{{ match.title || 'Untitled' }}</h3>
+            <p v-if="match.author || match.createdAt" class="meta">
+              <span v-if="match.author">{{ match.author }}</span><span v-if="match.author && match.createdAt"> · </span><span v-if="match.createdAt">{{ match.createdAt.slice(0, 10) }}</span>
+            </p>
             <p class="chunk">{{ match.content || 'Passage unavailable.' }}</p>
             <button v-if="match.documentId" class="ghost" type="button" @click="openDocument(match.documentId)">Open document</button>
           </li>
@@ -197,6 +249,7 @@ async function openDocument (id: string) {
         <p v-if="detailError" class="err" role="alert">{{ detailError }}</p>
         <article v-if="selected" class="card">
           <h2>{{ selected.title }}</h2>
+          <p v-if="selected.author" class="meta">{{ selected.author }}</p>
           <pre class="body">{{ selected.body }}</pre>
         </article>
       </template>

@@ -1,6 +1,6 @@
 # Document library
 
-Hackathon v1 of an internal document library. Someone pastes or uploads a text or markdown note. On save the app chunks it, calls OpenRouter for embeddings, stores the document and chunks in Cloudflare D1, and stores the vectors in Cloudflare Vectorize. Search embeds the query and returns the closest chunks with the source document title.
+Hackathon v1 of an internal document library. Someone pastes or uploads a text or markdown note. On save the app chunks it, calls OpenRouter for embeddings, stores the document and chunks in Cloudflare D1, and stores the vectors in Cloudflare Vectorize. Search embeds the query and returns the closest chunks with the source document title. After migration `0002`, search also matches title, author, and body with SQLite FTS5 and can limit results to a created-at date range.
 
 Chat is not in this version. Nothing is embedded until a person uploads it.
 
@@ -30,11 +30,13 @@ Without a key, save and search return 503. For a click-through of chunking and s
 
 `npm run dev` uses Nitro's Cloudflare dev emulation (Miniflare). D1 is local. **Vectorize has no local simulator** in current Wrangler (the binding is remote-only), so dev search ranks the embedding JSON stored on each D1 chunk. The deployed Worker upserts and queries Vectorize. Set `VECTORIZE_REMOTE=true` in `.env` only when you want `nuxt dev` to call your real index as well (requires `wrangler login` and the index from the next section).
 
-The first request creates tables if they are missing. You can also apply the migration explicitly:
+The first request creates the base tables from `migrations/0001_init.sql` if they are missing. It does **not** add the author column or the FTS5 index. Apply both migrations for keyword search:
 
 ```bash
 npm run db:migrate:local
 ```
+
+Until `0002` is applied, save still works (an author is accepted and then dropped) and search stays vector-only. Date and title filters still apply, because `created_at` and `title` exist on the base table.
 
 Preview the production Worker bundle locally (after a build):
 
@@ -56,6 +58,9 @@ npm test
 | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `OPENROUTER_API_KEY` | `.env` for `npm run dev`. `.dev.vars` for `wrangler dev`. Production: `npx wrangler secret put OPENROUTER_API_KEY` |
 | `SITE_PASSWORD`      | Optional. Empty = unlocked. Same files for local. Production: `npx wrangler secret put SITE_PASSWORD`             |
+| `SLACK_SIGNING_SECRET` | Slack app signing secret. Unset = `POST /api/slack/events` returns not configured. Production: `npx wrangler secret put SLACK_SIGNING_SECRET` |
+| `SLACK_BOT_TOKEN`    | Bot token (`xoxb-…`) for `users.info`, history, and permalinks. Unset = messages still store, names stay blank. Production: `npx wrangler secret put SLACK_BOT_TOKEN` |
+| `SLACK_CHANNEL_IDS`  | Comma-separated allow list (`C…`, `G…`). Empty = archive nothing. Production: `npx wrangler secret put SLACK_CHANNEL_IDS` |
 | `MCP_SIGNING_KEY`    | Signs MCP OAuth tokens. At least 32 characters. Empty disables `/mcp`. Production: `npx wrangler secret put MCP_SIGNING_KEY` |
 
 Do not commit the key. Do not put it in `wrangler.jsonc`. Placeholders only live in `.env.example` and `.dev.vars.example`.
@@ -100,7 +105,7 @@ After `d1 create`, copy the printed `database_id` into `wrangler.jsonc` → `d1_
 
 Vectorize dimensions must stay **1536**. That is the default size of `openai/text-embedding-3-small` and the maximum Vectorize dimension. The index is cosine, which matches the model's normalized embeddings.
 
-Apply the remote migration before the first deploy (the Worker also runs `CREATE TABLE IF NOT EXISTS` on demand):
+Apply the remote migrations before the first deploy (the Worker also runs `CREATE TABLE IF NOT EXISTS` for the base tables on demand; author and FTS5 come only from `migrations/0002_document_search.sql`):
 
 ```bash
 npm run db:migrate:remote
@@ -205,13 +210,69 @@ New vectors can take a few seconds to show up in search. Vectorize applies inser
 
 ## What the app does
 
-1. `POST /api/documents` with JSON `{ "title", "body" }` or multipart fields `title` and `file` (or `body`).
+1. `POST /api/documents` with JSON `{ "title", "body", "author"? }` or multipart fields `title`, optional `author`, and `file` (or `body`). Author is optional. It is stored only when `documents.author` exists.
 2. Split the body into chunks of about 1200 characters (max 48 chunks, max ~200k characters).
 3. `POST https://openrouter.ai/api/v1/embeddings` with `openai/text-embedding-3-small` and `dimensions: 1536`.
-4. Insert the document and chunks into D1, including the embedding JSON on `chunks.embedding` (this is what local dev searches). Upsert vectors into Vectorize (id = chunk id, metadata = document id, title, chunk index), except in local dev unless `VECTORIZE_REMOTE=true`.
-5. `POST /api/search` with `{ "query", "topK"? }` embeds the query. Deployed Workers run `VECTORIZE.query` and join the hit ids back to D1. Local dev ranks the stored D1 embeddings with cosine similarity. Either way the response includes chunk text and the source title.
+4. Insert the document and chunks into D1, including the embedding JSON on `chunks.embedding` (this is what local dev searches). Upsert vectors into Vectorize (id = chunk id, metadata = document id, title, chunk index), except in local dev unless `VECTORIZE_REMOTE=true`. Triggers keep the FTS5 index in sync when it exists.
+5. `POST /api/search` with `{ "query", "topK"?, "from"?, "to"?, "title"?, "author"? }`. `from` and `to` are inclusive `YYYY-MM-DD` dates compared with the UTC timestamp in `documents.created_at`. `title` and `author` are extra keyword constraints. Deployed Workers run `VECTORIZE.query` (up to 50 hits when a filter is set, so a date or title filter can drop some of them) and join the hit ids back to D1. Local dev ranks the stored D1 embeddings with cosine similarity. When `documents_fts` exists, those vector hits are fused with the FTS5 ranking. The response includes chunk text, title, author, and `createdAt`.
+
+## Keyword search and dates
+
+`migrations/0002_document_search.sql` adds:
+
+- `documents.author` (nullable text)
+- `documents_fts`, an FTS5 index of `title`, `author`, and `body` using `unicode61 remove_diacritics 2`, so `č`/`š`/`ž` match `c`/`s`/`z` in both the stored text and the query
+- insert, update, and delete triggers, plus a backfill of rows that already exist
+
+Search builds a quoted FTS expression (user text is not passed through as raw FTS syntax). Vector rank and keyword rank are combined with reciprocal rank fusion (`1 / (60 + rank)`). An exact title, author, or phrase hit therefore ranks with the semantic hits. If FTS returns nothing, or the FTS table is not there yet, the response is the vector ranking unchanged, including the original similarity scores.
+
+Date filtering is done in D1 on `documents.created_at` after the vector query returns. It does not require a Vectorize metadata index or a re-upsert of existing vectors. `to` covers the whole UTC day (`created_at <` the next date).
+
+PR preview versions share production D1 and do not run migrations. Before `0002` is applied, the new code does not select or insert `author` and does not query `documents_fts`, so upload and search do not 500. Author-only search returns no keyword hits until the index exists. A normal query still uses vectors. Title text and the date range still filter, because those columns are in `0001`.
+
+`server/utils/fts.ts` builds MATCH expressions and fuses ranked lists. A later Slack archive can reuse it; this change does not add Slack.
+
+Try it locally after `npm run db:migrate:local`:
+
+```bash
+npx wrangler d1 execute DB --local --command "INSERT INTO documents (id, title, body, author, r2_key, created_at) VALUES ('doc-cokolada', 'Čokolada', 'Recept za štrudelj.', 'Maja Župan', NULL, '2024-05-01T08:00:00.000Z');"
+npx wrangler d1 execute DB --local --command "SELECT document_id, title, author FROM documents_fts WHERE documents_fts MATCH 'cokolada';"
+npx wrangler d1 execute DB --local --command "SELECT document_id, author FROM documents_fts WHERE documents_fts MATCH 'author : \"zupan\"';"
+```
+
+`cokolada` and `zupan` find the row with the carons. A search limited to `from=2024-06-01` does not.
 
 Other routes: `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/documents/:id`, `GET /api/health`, and the MCP routes below. With `SITE_PASSWORD` set, direct calls to the document and search routes return 401 before any embedding request. Health stays public. `POST /api/auth/login` checks the password and sets the cookie.
+
+## Slack archive
+
+Allow-listed Slack channels are copied into D1 and searched with FTS5 only. There are no embeddings and no Vectorize index for messages.
+
+`migrations/0003_slack_archive.sql` adds `slack_messages`, channel and user caches, `slack_reactions`, and `slack_messages_fts`. The tokenizer is `unicode61 remove_diacritics 2`, so `č`/`š`/`ž` match `c`/`s`/`z`. Triggers keep the index in sync. A deleted message stays in the table and in search: `deleted` is set, `deleted_at` is recorded, and the text, raw event, and edit history stay. Results are flagged deleted. The Worker does **not** create these tables on demand. PR previews share production D1 and do not run migrations, so search returns a clear "not configured" response until `0003` has been applied. Missing `SLACK_*` secrets do not crash the Worker.
+
+`POST /api/slack/events` is the Slack Events API request URL. It checks `X-Slack-Signature` (v0 HMAC-SHA256 over `v0:timestamp:raw body`, five-minute window, constant-time compare), answers `url_verification`, and acknowledges other events before finishing the write with `waitUntil`. The path is the only route exempt from Cloudflare Access and the site password. Signature verification is the lock. `POST /api/slack/search` and `POST /api/slack/backfill` stay behind Access or the password.
+
+Cloudflare Access runs before the Worker. Add a Bypass policy for **only** `https://doc-library.binec.workers.dev/api/slack/events` (the app path `/api/slack/events`). Do not bypass the rest of the hostname.
+
+Manifest: [`docs/slack-app-manifest.yml`](docs/slack-app-manifest.yml). Bot scopes: `channels:history`, `groups:history`, `channels:read`, `groups:read`, `users:read`, `reactions:read`, `files:read`. Events: `message.channels`, `message.groups`, `reaction_added`, `reaction_removed`, `channel_rename`, `group_rename`. Request URL: `https://doc-library.binec.workers.dev/api/slack/events`.
+
+Setup, in order, after this branch is on `main` and the deploy workflow has applied `0003`:
+
+1. `npx wrangler secret put SLACK_SIGNING_SECRET`
+2. `npx wrangler secret put SLACK_BOT_TOKEN`
+3. `npx wrangler secret put SLACK_CHANNEL_IDS` (comma-separated ids)
+4. Access Bypass for `/api/slack/events` only.
+5. Paste the request URL into the Slack app and install it.
+6. Invite the bot to each allow-listed channel.
+7. Sign in to Korwell and `POST /api/slack/backfill` (optional JSON `{ "channelIds": ["C…"], "resume": { "channelId", "historyCursor", "pageOffset", "threadTs", "repliesCursor" } }`). Slack Free history is about 90 days. Each call stays under D1's free-plan query cap (a batch of writes counts as one query) and returns `partial: true` with a resume cursor when the budget, the time limit, or a `Retry-After` that would overrun the deadline is reached. Call again with that `resume` until `partial` is false. A channel Slack refuses is reported on its own and the next channel still runs. A rejected event signature is a generic 401; the reason is only in the Worker logs.
+
+The search page has a Slack tab: full text, plus channel, person, and a UTC date range on the message timestamp. Results show the author, channel, time, thread snippet, and permalink.
+
+Local check after `npm run db:migrate:local`:
+
+```bash
+npx wrangler d1 execute DB --local --command "SELECT name FROM sqlite_master WHERE name = 'slack_messages_fts';"
+```
 
 ## Layout
 
@@ -222,12 +283,16 @@ wrangler.jsonc          D1, Vectorize, preview_urls
 public/robots.txt       disallow every crawler
 public/_headers         X-Robots-Tag on static assets
 migrations/0001_init.sql
-migrations/0004_mcp_used_codes.sql  single-use MCP authorization codes
-server/api/             upload, list, search
+migrations/0002_document_search.sql   author column and FTS5
+migrations/0003_slack_archive.sql
+migrations/0004_mcp_used_codes.sql    single-use MCP authorization codes
+docs/slack-app-manifest.yml
+server/api/             upload, list, search, Slack events
 server/routes/          MCP endpoint and OAuth authorize, token, register
-server/middleware/      X-Robots-Tag, the shared-password gate, OAuth discovery
-server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes, MCP tools
-app/pages/index.vue     paste/upload and search UI
+server/middleware/      X-Robots-Tag, the shared-password / Access gate, OAuth discovery
+server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes, FTS and date helpers, Slack archive, MCP tools
+app/pages/index.vue     document search (date, title, author filters) and the Slack search tab
+app/pages/feed.vue      paste/upload, including optional author
 ```
 
 ## Kaldi email sign-in with Cloudflare Access
@@ -266,11 +331,11 @@ the live gate. No database migration is required.
 
 | Tool | What it does |
 | --- | --- |
-| `search` | Semantic search. `query` is the argument ChatGPT sends. Optional `limit` (1–20, default 8), `from`, `to` (inclusive UTC `YYYY-MM-DD`), and `author`. A date or author can stand in for `query` once metadata search is deployed. Returns `{ "results": [{ "id", "title", "url" }] }` for ChatGPT deep research and company knowledge. |
+| `search` | Semantic search. `query` is the argument ChatGPT sends. Optional `limit` (1–20, default 8), `from`, `to` (inclusive UTC `YYYY-MM-DD`), and `author`. Returns `{ "results": [{ "id", "title", "url" }] }` for ChatGPT deep research and company knowledge. |
 | `fetch` | Full document text for one `id` from `search`. Returns `{ "id", "title", "text", "url", "metadata" }`. |
-| `search_slack` | Omitted until the Slack archive is on `main` and this branch is rebased. See the comment in `server/utils/mcp-library.ts`. |
+| `search_slack` | Search archived Slack messages (`query`, optional `channel`, `user`, `from`, `to`, `limit`). Listed only once migration 0003 is applied. Each result has `id` (`<channel>/<ts>`), `title`, `text`, `url`, `sentAt`, `deleted`, and `deletedAt`; deleted messages stay in the archive and are flagged. |
 
-`search` calls `searchDocuments`. On current `main` that function ignores the filters object. After rebasing onto metadata search (#6), the same call applies `from`, `to`, and `author` (the function moves to `server/utils/search.ts`; update the import if the export moves). Chunk hits are collapsed to one result per document. The citation URL is `https://<host>/library?document=<id>`.
+`search` calls `searchDocuments` in `server/utils/search.ts`, which applies `from`, `to`, and `author`. It needs `query` or `author`; a date range alone is refused. Chunk hits are collapsed to one result per document. The citation URL is `https://<host>/library?document=<id>`.
 
 There are no write tools.
 

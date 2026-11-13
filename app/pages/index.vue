@@ -1,30 +1,5 @@
 <script setup lang="ts">
-interface ChatSource {
-  kind: 'document' | 'slack'
-  title: string
-  url: string
-  detail?: string
-}
-
-interface ToolActivity {
-  id: string
-  name: string
-  input: Record<string, unknown>
-  done: boolean
-  ok: boolean
-  count: number
-  title?: string
-}
-
-interface ChatTurn {
-  id: string
-  role: 'user' | 'assistant'
-  text: string
-  tools: ToolActivity[]
-  sources: ChatSource[]
-  status: 'streaming' | 'done' | 'stopped' | 'error'
-  error?: unknown
-}
+import type { ChatSource, ChatTurn, ToolActivity } from '~/composables/useChatHistory'
 
 type ChatEvent =
   | { type: 'text', text: string }
@@ -43,6 +18,10 @@ const suggestions = [
 
 // useState keeps the conversation while you open a cited document and come back.
 const turns = useState<ChatTurn[]>('korwell-chat', () => [])
+// Which saved chat the conversation belongs to; null until the first question.
+const chatId = useState<string | null>('korwell-chat-id', () => null)
+const history = useChatHistory()
+const historyOpen = ref(false)
 const draft = ref('')
 const streaming = ref(false)
 const composer = ref<{ focus: () => void } | null>(null)
@@ -53,7 +32,7 @@ const newId = () => Math.random().toString(36).slice(2)
 
 // Pairs whose answer failed or came back empty are left out, so the model
 // never sees two user turns in a row.
-function history () {
+function priorMessages () {
   const messages: Array<{ role: 'user' | 'assistant', content: string }> = []
   const list = turns.value
   for (let index = 0; index < list.length; index += 1) {
@@ -120,10 +99,15 @@ async function ask (question: string) {
   if (!text || streaming.value) return
   draft.value = ''
   turns.value.push({ id: newId(), role: 'user', text, tools: [], sources: [], status: 'done' })
-  const messages = history()
+  const messages = priorMessages()
   turns.value.push({ id: newId(), role: 'assistant', text: '', tools: [], sources: [], status: 'streaming' })
   // Mutate through the reactive array so every change re-renders.
   const turn = turns.value.at(-1)!
+  // Saved now, so the question survives a reload mid-answer. The array is
+  // kept so the answer is saved to this chat even if another one is opened.
+  const id = chatId.value ??= newId()
+  const conversation = turns.value
+  history.save(id, conversation)
   streaming.value = true
   controller = new AbortController()
   keepScrolled(true)
@@ -168,6 +152,8 @@ async function ask (question: string) {
   } finally {
     streaming.value = false
     controller = null
+    // Unless the chat was deleted while it was answering.
+    if (history.chats.value.some(chat => chat.id === id)) history.save(id, conversation)
     await nextTick()
     composer.value?.focus()
   }
@@ -188,9 +174,44 @@ function retry () {
 function newChat () {
   stop()
   turns.value = []
+  chatId.value = null
   draft.value = ''
   nextTick(() => composer.value?.focus())
 }
+
+function openChat (id: string) {
+  const saved = history.open(id)
+  if (!saved) {
+    history.refresh()
+    return
+  }
+  stop()
+  turns.value = saved
+  chatId.value = id
+  draft.value = ''
+  nextTick(() => {
+    end.value?.scrollIntoView({ block: 'end' })
+    composer.value?.focus()
+  })
+}
+
+function removeChat (id: string) {
+  history.remove(id)
+  if (chatId.value === id) newChat()
+}
+
+function clearChats () {
+  history.clear()
+  newChat()
+}
+
+function showHistory () {
+  history.refresh()
+  historyOpen.value = true
+}
+
+// The few latest chats, listed under the suggestions on the empty page.
+const recentChats = computed(() => history.chats.value.slice(0, 4))
 
 function quoted (value: unknown) {
   return typeof value === 'string' && value ? `“${value}”` : ''
@@ -240,6 +261,7 @@ const asking = useState('korwell-asking', () => false)
 watch(streaming, (value) => { asking.value = value })
 
 onMounted(() => {
+  history.refresh()
   composer.value?.focus()
   if (turns.value.length) end.value?.scrollIntoView({ block: 'end' })
 })
@@ -276,6 +298,26 @@ onBeforeUnmount(() => {
           />
         </li>
       </ul>
+
+      <nav v-if="recentChats.length" class="mt-14 w-[min(46rem,100%)] text-left" aria-labelledby="recent-title">
+        <div class="flex items-baseline justify-between gap-4 border-b border-default pb-2">
+          <h2 id="recent-title" class="font-sans text-sm font-semibold tracking-wide text-muted uppercase">Recent chats</h2>
+          <UButton variant="link" class="p-0 text-link" :label="`All chats (${history.chats.value.length})`" @click="showHistory" />
+        </div>
+        <ul class="divide-y divide-default">
+          <li v-for="chat in recentChats" :key="chat.id">
+            <button
+              type="button"
+              class="flex w-full items-baseline gap-4 py-2.5 text-left hover:text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              @click="openChat(chat.id)"
+            >
+              <UIcon name="i-lucide-message-square" class="size-4 flex-none self-center text-dimmed" />
+              <span class="min-w-0 flex-1 truncate">{{ chat.title }}</span>
+              <time class="flex-none text-sm text-muted" :datetime="chat.updatedAt">{{ formatShortDate(chat.updatedAt) }}</time>
+            </button>
+          </li>
+        </ul>
+      </nav>
     </section>
 
     <template v-else>
@@ -346,6 +388,7 @@ onBeforeUnmount(() => {
 
       <div class="sticky bottom-0 bg-linear-to-b from-transparent to-paper to-[1.5rem] pt-6 pb-5">
         <div class="mx-auto flex w-[min(48rem,100%-2rem)] items-end gap-2">
+          <UButton color="neutral" variant="outline" size="xl" icon="i-lucide-history" square class="mb-1.5 bg-default" aria-label="Chat history" title="Chat history" @click="showHistory" />
           <UButton color="neutral" variant="outline" size="xl" icon="i-lucide-plus" square class="mb-1.5 bg-default" aria-label="New chat" title="New chat" @click="newChat" />
           <ChatComposer
             ref="composer"
@@ -359,5 +402,14 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </template>
+
+    <ChatHistory
+      v-model:open="historyOpen"
+      :chats="history.chats.value"
+      :current-id="chatId"
+      @select="openChat"
+      @remove="removeChat"
+      @clear="clearChats"
+    />
   </main>
 </template>

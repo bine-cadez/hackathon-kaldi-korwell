@@ -199,9 +199,10 @@ npm run cf:provision
 
 Then:
 
-1. Paste the real D1 `database_id` over `00000000-0000-0000-0000-000000000000` in `wrangler.jsonc` and commit that change to `main`. The placeholder id will not deploy.
-2. `npx wrangler secret put OPENROUTER_API_KEY` and, to lock the site, `npx wrangler secret put SITE_PASSWORD` (once; later deploys leave both in place). Skip `SITE_PASSWORD` only when this copy should stay open.
-3. Merge this workflow to `main`, with the two GitHub secrets set. The next push to `main` (or a manual run) applies `migrations/0001_init.sql` if it is not already applied, then deploys.
+1. The R2 bucket must exist before deploy (`npx wrangler r2 bucket create doc-library`, part of `cf:provision`). R2 must be enabled on the account once in the dashboard. A missing bucket fails the deploy.
+2. Paste the real D1 `database_id` over `00000000-0000-0000-0000-000000000000` in `wrangler.jsonc` and commit that change to `main`. The placeholder id will not deploy.
+3. `npx wrangler secret put OPENROUTER_API_KEY` and, to lock the site, `npx wrangler secret put SITE_PASSWORD` (once; later deploys leave both in place). Skip `SITE_PASSWORD` only when this copy should stay open.
+4. Merge this workflow to `main`, with the two GitHub secrets set. The next push to `main` (or a manual run) applies `migrations/0001_init.sql` if it is not already applied, then deploys.
 
 You can still deploy by hand with `npm run db:migrate:remote` and `npm run deploy` (`nuxt build && wrangler --cwd .output deploy`). Nitro writes the Worker entry into `.output/server/wrangler.json`. Migrations stay on the root config because `.output` does not contain `migrations/`.
 
@@ -237,7 +238,32 @@ Limits and errors:
 - The converted text still has to fit the v1 limits: about 200k characters and 48 chunks. Depending on paragraph breaks, that is roughly 35k–55k characters, often 10–20 PDF pages. A longer file returns **413** and has to be split.
 - A PDF with no text layer (a scan) converts to nothing and returns **422** `No text found`. There is no OCR.
 - If Workers AI reports a conversion error, the route returns **422** with that message. If the call itself fails, it returns **502**. If the binding is missing, it returns **503**.
-- Only the extracted text is stored. The original file is not kept.
+- The extracted text is what gets chunked and searched. The original file is also kept, see [Original files and uploader](#original-files-and-uploader).
+
+## Original files and uploader
+
+Every file upload keeps the file exactly as it was sent, next to its markdown, in the R2 bucket `doc-library` (binding `BLOB`):
+
+```text
+documents/<id>/original.<ext>   the uploaded PDF, Word, Excel, CSV, or text file
+documents/<id>/content.md       the markdown that was chunked and embedded
+```
+
+`migrations/0005_document_source.sql` adds nullable columns to `documents`:
+
+| Column | Meaning |
+| ------ | ------- |
+| `uploaded_by` | Email of the person who uploaded it, from the verified Cloudflare Access JWT. Never read from the request. `NULL` in shared-password or open mode, because there is no identity there. |
+| `source_key`, `source_filename`, `source_content_type`, `source_size` | Where the original lives in R2, its cleaned filename, type, and size. `NULL` for pasted text. |
+
+The upload time is the existing `created_at`.
+
+- The original is written first. If R2 rejects it, the upload returns **502** and nothing is saved. If the D1 or Vectorize step fails afterwards, the R2 objects are removed again.
+- `GET /api/documents/:id/source` downloads the original as an attachment with its original (UTF-8) filename. The content type comes from the file extension, not from the browser, and is sent with `X-Content-Type-Options: nosniff`. It is behind the same Access or password gate as the rest of `/api`.
+- `GET /api/documents` and `GET /api/documents/:id` return `uploadedBy` and `source` (`filename`, `contentType`, `size`, `url`). The Library page and the search result detail show "Uploaded <date> by <email>" plus a link to the original. MCP `fetch` adds `uploaded_by` and `original_filename` to its metadata.
+- Deleting a document removes everything under `documents/<id>/`.
+- Before `0005` is applied (PR previews share production D1), uploads still work and the original is still put in R2, but the row does not point to it and the uploader is not recorded.
+- `npm run dev` uses Wrangler's local R2 simulator, so no login is needed. Documents uploaded before this change have no original.
 
 ## Keyword search and dates
 

@@ -260,7 +260,7 @@ test('stored embeddings honour the date range and author before cosine ranking',
   insert.run('doc-other', 'Čokolada', 'Drugi avtor.', 'Ana Kovač', '2024-05-01T08:00:00.000Z')
   chunk.run('chunk-other', 'doc-other', 'Drugi avtor.', JSON.stringify([1, 0, 0]), '2024-05-01T08:00:00.000Z')
 
-  const caps = { author: true, fts: true }
+  const caps = { author: true, fts: true, source: false }
   const may = await searchStoredEmbeddings(
     envFor(sqlite),
     [1, 0, 0],

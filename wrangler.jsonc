@@ -48,4 +48,13 @@
       "index_name": "doc-chunks",
     },
   ],
+  // Uploaded originals and their markdown, under documents/<id>/.
+  // Create the bucket once: npx wrangler r2 bucket create doc-library
+  // (deploys fail while it is missing). npm run dev uses a local simulator.
+  "r2_buckets": [
+    {
+      "binding": "BLOB",
+      "bucket_name": "doc-library",
+    },
+  ],
 }

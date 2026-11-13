@@ -1,8 +1,10 @@
+import type { AccessUser } from '../../utils/cloudflare-access'
 import { extractFileText, titleFromFilename } from '../../utils/document-file'
+import { toSourceFile, type SourceFile } from '../../utils/document-storage'
 import { saveDocument } from '../../utils/documents'
 import { readCloudflareEnv, requireEnv, requireOpenRouterApiKey, toHttpError } from '../../utils/env'
 
-async function readDocumentInput (event: Parameters<typeof readBody>[0]) {
+async function readDocumentInput (event: Parameters<typeof readBody>[0]): Promise<{ title: string, body: string, author: string, source?: SourceFile }> {
   const contentType = getHeader(event, 'content-type') || ''
   if (contentType.includes('multipart/form-data')) {
     const parts = await readMultipartFormData(event)
@@ -28,6 +30,8 @@ async function readDocumentInput (event: Parameters<typeof readBody>[0]) {
       // PDF, Word, and Excel files are converted to markdown by Workers AI.
       body = await extractFileText(file, readCloudflareEnv(event)?.AI)
       if (!title.trim() && file.filename) title = titleFromFilename(file.filename)
+      // Kept in R2 next to the markdown so the original can be downloaded later.
+      return { title, body, author, source: toSourceFile(file) }
     }
     return { title, body, author }
   }
@@ -51,7 +55,9 @@ async function readDocumentInput (event: Parameters<typeof readBody>[0]) {
 export default defineEventHandler(async (event) => {
   try {
     const input = await readDocumentInput(event)
-    const saved = await saveDocument(requireEnv(event), requireOpenRouterApiKey(event), input)
+    // Set by the Cloudflare Access middleware after it verifies the JWT. Shared-password mode has no identity.
+    const uploadedBy = (event.context.korwellAccessUser as AccessUser | undefined)?.email ?? null
+    const saved = await saveDocument(requireEnv(event), requireOpenRouterApiKey(event), { ...input, uploadedBy })
     if (!import.meta.dev) return saved
 
     // Count the saved text for the local Panem preview, including converted files.

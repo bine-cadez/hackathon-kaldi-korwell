@@ -40,10 +40,32 @@ export interface R2Bucket {
   delete (key: string): Promise<void>
 }
 
+export interface MarkdownDocument {
+  name: string
+  blob: Blob
+}
+
+export interface ConversionResult {
+  name: string
+  format: 'markdown' | 'text' | 'error'
+  mimetype?: string
+  tokens?: number
+  data?: string
+  error?: string
+}
+
+export interface WorkersAI {
+  toMarkdown (
+    files: MarkdownDocument | MarkdownDocument[],
+    options?: { conversionOptions?: { pdf?: { metadata?: boolean } } }
+  ): Promise<ConversionResult | ConversionResult[]>
+}
+
 export interface DocLibraryEnv {
   DB: DocDatabase
   VECTORIZE: VectorizeIndex
   BLOB?: R2Bucket
+  AI?: WorkersAI
   OPENROUTER_API_KEY?: string
   SITE_PASSWORD?: string
   SLACK_SIGNING_SECRET?: string

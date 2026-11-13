@@ -14,11 +14,12 @@ useHead({
 </script>
 
 <template>
-  <div>
+  <div class="archive-app">
     <NuxtRouteAnnouncer />
     <header class="archive-header">
       <NuxtLink class="archive-brand" to="/">The Kaldi Archive</NuxtLink>
       <nav aria-label="Main navigation">
+        <NuxtLink to="/chat">Ask</NuxtLink>
         <NuxtLink to="/">Search</NuxtLink>
         <NuxtLink to="/library" :class="{ 'is-current-section': inLibrary }">Library</NuxtLink>
         <NuxtLink to="/feed">Add document</NuxtLink>
@@ -27,5 +28,6 @@ useHead({
       <span v-if="accessEmail" class="archive-account" aria-label="Signed in email">{{ accessEmail }}</span>
     </header>
     <NuxtPage />
+    <footer class="archive-disclaimer">Korwell can make mistakes. The archive is only human.</footer>
   </div>
 </template>

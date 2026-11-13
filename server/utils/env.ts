@@ -32,12 +32,20 @@ export interface VectorizeIndex {
   deleteByIds (ids: string[]): Promise<unknown>
 }
 
+export interface R2ObjectBody {
+  body: ReadableStream
+  size: number
+  httpMetadata?: { contentType?: string }
+}
+
 export interface R2Bucket {
-  put (key: string, value: string, options?: {
+  put (key: string, value: string | Uint8Array | ArrayBuffer, options?: {
     httpMetadata?: { contentType?: string }
     customMetadata?: Record<string, string>
   }): Promise<unknown>
-  delete (key: string): Promise<void>
+  get (key: string): Promise<R2ObjectBody | null>
+  list (options: { prefix: string, cursor?: string }): Promise<{ objects: Array<{ key: string }>, truncated: boolean, cursor?: string }>
+  delete (keys: string | string[]): Promise<void>
 }
 
 export interface MarkdownDocument {
@@ -67,10 +75,14 @@ export interface DocLibraryEnv {
   BLOB?: R2Bucket
   AI?: WorkersAI
   OPENROUTER_API_KEY?: string
+  /** OpenRouter model id for /api/chat. Defaults to DEFAULT_CHAT_MODEL. */
+  CHAT_MODEL?: string
   SITE_PASSWORD?: string
   SLACK_SIGNING_SECRET?: string
   SLACK_BOT_TOKEN?: string
   SLACK_CHANNEL_IDS?: string
+  /** "off" disables duplicate upload detection (see duplicates.ts). On by default. */
+  DUPLICATE_CHECK?: string
 }
 
 export function readCloudflareEnv (event: { context: { cloudflare?: { env?: DocLibraryEnv } } }): DocLibraryEnv | undefined {

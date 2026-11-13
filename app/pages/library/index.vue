@@ -3,7 +3,7 @@ import { useQuery } from '@pinia/colada'
 import type { LocationQueryRaw } from 'vue-router'
 import { useDeleteDocumentMutation } from '~/mutations/documents'
 import { documentFacetsQuery, documentListQuery, documentPath, type DocumentPage, type FacetValue } from '~/queries/documents'
-import { LIBRARY_PAGE_SIZES, formatFileSize, hasActiveLibraryFilters, libraryRouteQuery, parseLibraryQuery, type LibraryFilters } from '~/utils/libraryFilters'
+import { LIBRARY_PAGE_SIZES, hasActiveLibraryFilters, libraryRouteQuery, parseLibraryQuery, type LibraryFilters } from '~/utils/libraryFilters'
 
 // Old links (/library?document=<id>, cited in earlier Claude answers) open the
 // document's own page. 301 on a full page load, a replace on client navigation.
@@ -248,15 +248,8 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
           <li v-for="document in documents" :key="document.id">
             <div>
               <NuxtLink class="doc-link" :to="documentPath(document.id)">{{ document.title }}</NuxtLink>
-              <p class="meta">
-                <span v-if="document.author">{{ document.author }} · </span>
-                <time :datetime="document.createdAt">{{ document.createdAt.slice(0, 10) }}</time>
-              </p>
-              <p v-if="document.fileName || document.uploadedBy" class="meta doc-provenance">
-                <span v-if="document.fileName" class="doc-file" :title="document.fileName">{{ document.fileName }}</span>
-                <span v-if="document.fileName && document.fileSize !== null && document.fileSize !== undefined"> · {{ formatFileSize(document.fileSize) }}</span>
-                <span v-if="document.uploadedBy">{{ document.fileName ? ' · ' : '' }}uploaded by {{ document.uploadedBy }}</span>
-              </p>
+              <p v-if="document.author" class="meta">{{ document.author }}</p>
+              <DocumentProvenance :created-at="document.createdAt" :uploaded-by="document.uploadedBy" :source="document.source" />
             </div>
             <button class="danger" type="button" :aria-label="`Delete ${document.title}`" @click="removeDocument(document.id)">Delete</button>
           </li>
@@ -280,5 +273,4 @@ async function removeDocument (id: string, { confirmFirst = true } = {}) {
 <style scoped>
 .doc-list.is-stale { opacity: 0.55; transition: opacity 120ms ease-in; }
 .doc-list li > div { min-width: 0; }
-.doc-provenance { overflow-wrap: anywhere; }
 </style>

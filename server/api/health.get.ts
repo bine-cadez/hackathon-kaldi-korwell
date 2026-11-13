@@ -1,6 +1,7 @@
 import { EMBEDDING_DIMENSIONS, EMBEDDING_MODEL } from '../utils/embeddings'
 import { accessConfig } from '../utils/cloudflare-access.ts'
 import { signingKeyBytes, signingKeyFromSources } from '../utils/mcp-auth.ts'
+import { duplicateCheckEnabled } from '../utils/duplicates.ts'
 import { readCloudflareEnv } from '../utils/env'
 import { slackSettings } from '../utils/slack-config.ts'
 import { sitePasswordFromSources } from '../utils/site-password.ts'
@@ -21,6 +22,8 @@ export default defineEventHandler((event) => {
     internalOnly: true,
     auth,
     mcp: Boolean(signingKeyBytes(signingKey)),
+    // The setting only; the check also needs migration 0005 to have run.
+    duplicateCheck: duplicateCheckEnabled(env?.DUPLICATE_CHECK, process.env.DUPLICATE_CHECK),
     embeddingModel: EMBEDDING_MODEL,
     dimensions: EMBEDDING_DIMENSIONS,
     vectorBackend: useLocalVectors() ? 'd1' : 'vectorize',

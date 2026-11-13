@@ -77,7 +77,7 @@ export function normalizeUnicode (value: string): string {
 // Slovenian letters (and ć, đ from names of Croatian or Serbian origin) get a
 // marker after their base letter. "{" and "|" sort after every ASCII letter
 // and digit, so "cz…" < "č…" < "d…". Other accents fold onto the base letter.
-// migrations/0005_document_uploads.sql backfills existing rows with the same rules.
+// migrations/0007_document_title_sort.sql backfills existing rows with the same rules.
 const SORT_LETTERS: Record<string, string> = { č: 'c{', ć: 'c|', đ: 'd{', š: 's{', ž: 'z{' }
 
 export function slovenianSortKey (value: string): string {

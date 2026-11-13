@@ -2,7 +2,7 @@
 import { useQuery } from '@pinia/colada'
 import { SEARCH_QUERY_KEYS, documentPath, documentSearchQuery, type SearchMatch, type SearchParams } from '~/queries/documents'
 
-// Excerpts checked against the text of Nineteen Eighty-Four, Parts I and II.
+// Excerpts from Nineteen Eighty-Four, Parts I–III and the Newspeak appendix.
 const archiveQuotes = [
   'The best books, he perceived, are those that tell you what you know already.',
   'The heresy of heresies was common sense.',
@@ -16,7 +16,57 @@ const archiveQuotes = [
   'a tiny world',
   'thoughts to words',
   'human heritage',
-  'profound wisdom'
+  'profound wisdom',
+  'the clocks were striking thirteen',
+  'BIG BROTHER IS WATCHING YOU',
+  'a time when thought is free',
+  'To mark the paper was the decisive act.',
+  'the place where there is no darkness',
+  'a link of understanding between them',
+  'the memory of the lost chocolate',
+  'To know and not to know',
+  'the labyrinthine world of doublethink',
+  'to use logic against logic',
+  'no record outside your own memory',
+  'the destruction of words',
+  'the range of thought',
+  'the range of consciousness',
+  'Newspeak is Ingsoc and Ingsoc is Newspeak',
+  'Everything faded into mist.',
+  'The past was erased',
+  'the erasure was forgotten',
+  'the lie became truth',
+  'unmistakable evidence of an act of falsification',
+  'Freedom is the freedom to say that two plus two make four.',
+  'If that is granted, all else follows.',
+  'All history was a palimpsest',
+  'I love you.',
+  'a scrap of paper',
+  'the memory hole',
+  'the Golden Country',
+  'a sort of vague reverence',
+  'at the heart of the crystal',
+  'no ear at the keyhole',
+  'poverty and ignorance',
+  'the possibility of independent thought',
+  'Thus history is continuously rewritten.',
+  'Who controls the present controls the past',
+  'In records. It is written down.',
+  'In the mind. In human memories.',
+  'the eyes of the Party',
+  'The object of power is power.',
+  'Obedience is not enough.',
+  'TWO AND TWO MAKE FIVE',
+  'Oldspeak',
+  'crimethink',
+  'thinkpol',
+  'goodthink',
+  'All ambiguities and shades of meaning',
+  'a sort of verbal shorthand',
+  'duckspeak',
+  'Big Brother is ungood',
+  'the last link with the past',
+  'in full control of all records'
 ]
 const archiveQuote = ref('')
 
@@ -194,7 +244,7 @@ function runSearch () {
       <form v-else class="search-form" role="search" novalidate @submit.prevent="runSearch">
         <div class="search-bar">
           <label class="sr-only" for="archive-query">Search the records</label>
-          <input id="archive-query" ref="queryInput" v-model="query" :aria-invalid="queryInvalid || undefined" :aria-describedby="queryInvalid ? 'archive-query-error' : undefined" @input="queryInvalid = false; followCaret()" @focus="followCaret" @click="followCaret" @keyup="followCaret" type="text" inputmode="search" enterkeyhint="search" name="query" placeholder="Search the records…">
+          <input id="archive-query" ref="queryInput" v-model="query" :aria-invalid="queryInvalid || undefined" :aria-describedby="queryInvalid ? 'archive-query-error' : undefined" @input="queryInvalid = false; followCaret()" @focus="followCaret" @click="followCaret" @keyup="followCaret" type="text" inputmode="search" enterkeyhint="search" name="q" placeholder="Search the records…">
           <button v-if="query" class="clear-search" type="button" aria-label="Clear search" title="Clear search" @click="clearQuery">
             <svg viewBox="0 0 20 20" width="18" height="18" fill="none" aria-hidden="true">
               <path d="m6 6 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>

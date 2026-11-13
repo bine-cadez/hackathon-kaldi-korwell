@@ -1,6 +1,10 @@
 <script setup lang="ts">
-const props = defineProps<{ noResults?: boolean, searching?: boolean }>()
+const props = defineProps<{ noResults?: boolean, searching?: boolean, blackHole?: boolean }>()
 const closed = ref(false)
+const eyeId = useId()
+const irisId = `${eyeId}-iris`
+const linesId = `${eyeId}-lines`
+const eyelidId = `${eyeId}-eyelid`
 watch(() => props.noResults, (noResults) => { closed.value = noResults })
 
 const eye = ref<SVGSVGElement | null>(null)
@@ -11,8 +15,10 @@ function resetGaze () {
   offset.value = { x: 0, y: 0 }
 }
 
+watch(() => props.blackHole, (open) => { if (open) resetGaze() })
+
 function lookAt (clientX: number, clientY: number) {
-  if (!eye.value || motion?.matches) return
+  if (!eye.value || motion?.matches || props.blackHole) return
   const bounds = eye.value.getBoundingClientRect()
   const x = clientX - (bounds.left + bounds.width * 125 / 240)
   const y = clientY - (bounds.top + bounds.height * 56 / 120)
@@ -45,24 +51,25 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <svg ref="eye" class="archive-eye" width="200" height="100" aria-hidden="true" viewBox="0 0 240 120">
+  <svg ref="eye" class="archive-eye" width="200" height="100" aria-hidden="true" viewBox="0 0 240 120" :class="{ 'black-hole-eye': blackHole }">
     <defs>
-      <pattern id="lines" width="5" height="5" patternUnits="userSpaceOnUse">
+      <pattern :id="linesId" width="5" height="5" patternUnits="userSpaceOnUse">
         <path d="M0 4h5" style="stroke: var(--accent)" stroke-width="1.4"/>
       </pattern>
-      <clipPath id="eyelid-clip">
-        <use href="#eye"/>
+      <clipPath :id="eyelidId">
+        <use :href="`#${irisId}`"/>
       </clipPath>
     </defs>
     <path fill="none" style="stroke: var(--accent)" stroke-width="2" d="M120 4 233 60 120 116 7 60Z"/>
-    <path id="eye" style="fill: var(--brand-orange)" d="M37 59c22-28 51-39 83-39 34 0 63 14 83 39-21 26-50 42-83 42-34 0-63-16-83-42Z"/>
-    <use href="#eye" fill="url(#lines)" style="fill:url(#lines)"/>
+    <path :id="irisId" style="fill: var(--brand-orange)" d="M37 59c22-28 51-39 83-39 34 0 63 14 83 39-21 26-50 42-83 42-34 0-63-16-83-42Z"/>
+    <use :href="`#${irisId}`" :style="{ fill: `url(#${linesId})` }"/>
     <g :transform="`translate(${offset.x} ${offset.y})`">
       <circle cx="125" cy="56" r="28" style="fill: var(--ink)"/>
       <circle cx="125" cy="56" r="23" fill="none" style="stroke: var(--brand-orange)" stroke-width="1.5"/>
       <path style="fill: var(--paper)" d="M130 42h13v5h-13z"/>
+      <circle v-if="blackHole" class="black-hole" cx="125" cy="56" r="36" />
     </g>
-    <g clip-path="url(#eyelid-clip)">
+    <g :clip-path="`url(#${eyelidId})`">
       <g class="eyelid" :class="{ 'eyelid-closed': closed, 'eyelid-searching': searching }">
         <rect x="36" y="19" width="168" height="83" class="eyelid-cover"/>
         <path d="M37 59q83 44 166 0" class="eyelid-seam"/>
@@ -74,6 +81,16 @@ onBeforeUnmount(() => {
 
 
 <style scoped>
+.black-hole {
+  fill: #090705;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: black-hole-open 950ms ease-out both;
+}
+@keyframes black-hole-open {
+  from { transform: scale(0.1); }
+  to { transform: scale(1); }
+}
 .eyelid { transform: translateY(-84px); }
 .eyelid-closed { transform: translateY(0); }
 .eyelid-cover { fill: var(--accent); }
@@ -81,7 +98,7 @@ onBeforeUnmount(() => {
 
 @media (prefers-reduced-motion: no-preference) {
   .eyelid { transition: transform 180ms ease-out; }
-  .eyelid:not(.eyelid-closed) { animation: idle-blink 7s ease-in-out infinite; }
+  .archive-eye:not(.black-hole-eye) .eyelid:not(.eyelid-closed) { animation: idle-blink 7s ease-in-out infinite; }
 
   .eyelid.eyelid-searching:not(.eyelid-closed) { animation: search-blink 1.2s ease-in-out infinite; }
 

@@ -61,7 +61,6 @@ async function removeDocument ({ confirmFirst = true } = {}) {
   }
 }
 
-const hasFileSize = computed(() => document.value?.fileSize !== null && document.value?.fileSize !== undefined)
 </script>
 
 <template>
@@ -117,11 +116,11 @@ const hasFileSize = computed(() => document.value?.fileSize !== null && document
           </template>
           <dt>Uploaded</dt>
           <dd><time :datetime="document.createdAt">{{ document.createdAt.slice(0, 16).replace('T', ' ') }} UTC</time></dd>
-          <template v-if="document.fileName">
-            <dt>File</dt>
+          <template v-if="document.source">
+            <dt>Original</dt>
             <dd>
-              <span class="doc-file">{{ document.fileName }}</span>
-              <span v-if="hasFileSize" class="meta"> · {{ formatFileSize(document.fileSize) }}</span>
+              <a class="doc-file" :href="document.source.url" download>{{ document.source.filename }}</a>
+              <span v-if="document.source.size !== null" class="meta"> · {{ formatFileSize(document.source.size) }}</span>
             </dd>
           </template>
         </dl>

@@ -21,8 +21,7 @@ npx wrangler vectorize create doc-chunks \
 echo
 
 
-echo "Creating optional R2 bucket 'doc-library' for raw text blobs..."
-echo "Skip this command if you do not want R2, and remove r2_buckets from wrangler.jsonc."
+echo "Creating R2 bucket 'doc-library' for uploaded originals and their markdown..."
 npx wrangler r2 bucket create doc-library
 echo
 echo "Next:"

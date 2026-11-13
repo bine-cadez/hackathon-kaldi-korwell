@@ -8,7 +8,10 @@ import { slovenianSortKey } from '../shared/utils/text.ts'
 
 const initSql = readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8')
 const searchSql = readFileSync(new URL('../migrations/0002_document_search.sql', import.meta.url), 'utf8')
-const uploadsSql = readFileSync(new URL('../migrations/0005_document_uploads.sql', import.meta.url), 'utf8')
+// Main's 0005 (uploader, original file) and 0006 (content hash), then 0007 (title sort, FTS file name).
+const laterSql = ['0005_document_source', '0006_document_content_hash', '0007_document_title_sort']
+  .map(name => readFileSync(new URL(`../migrations/${name}.sql`, import.meta.url), 'utf8'))
+const applyLater = (sqlite: DatabaseSync) => laterSql.forEach(sql => sqlite.exec(sql))
 
 function wrap (sqlite: DatabaseSync): DocDatabase {
   return {
@@ -52,11 +55,11 @@ const DOCS = [
   { id: 'd5', title: 'Čokolada recipe', author: 'Ana Kovač', createdAt: '2024-07-15T12:00:00.000Z', fileName: 'recept.txt', uploadedBy: null }
 ]
 
-type Migration = '0001' | '0002' | '0005'
+type Migration = '0001' | '0002' | '0007'
 
-// Rows are inserted with the columns of `migration`. With 0005, they are
-// inserted after 0002 and before 0005 runs, so 0005's backfill is exercised,
-// then file and uploader columns are filled in the way new saves would.
+// Rows are inserted with the columns of `migration`. With 0007, they are
+// inserted after 0002 and before 0005–0007 run, so 0007's backfill is exercised,
+// then uploader and original-file columns are filled in the way new saves would.
 function seeded (migration: Migration = '0002') {
   const sqlite = new DatabaseSync(':memory:')
   sqlite.exec(initSql)
@@ -72,11 +75,11 @@ function seeded (migration: Migration = '0002') {
     sqlite.prepare('INSERT INTO chunks (id, document_id, chunk_index, content, token_estimate, created_at) VALUES (?, ?, 0, ?, 1, ?)')
       .run(`${doc.id}-c0`, doc.id, 'chunk', doc.createdAt)
   }
-  if (migration === '0005') {
-    sqlite.exec(uploadsSql)
+  if (migration === '0007') {
+    applyLater(sqlite)
     for (const doc of DOCS) {
-      sqlite.prepare('UPDATE documents SET file_name = ?, file_size = ?, uploaded_by = ? WHERE id = ?')
-        .run(doc.fileName, doc.fileName ? 2048 : null, doc.uploadedBy, doc.id)
+      sqlite.prepare('UPDATE documents SET source_key = ?, source_filename = ?, source_size = ?, uploaded_by = ? WHERE id = ?')
+        .run(doc.fileName ? `documents/${doc.id}/original` : null, doc.fileName, doc.fileName ? 2048 : null, doc.uploadedBy, doc.id)
     }
   }
   return { env: envFor(sqlite), sqlite }
@@ -104,17 +107,17 @@ test('pages through documents newest first with totals', async () => {
 test('sorts oldest first and by title, case-insensitively', async () => {
   const { env } = seeded()
   assert.deepEqual(ids(await listDocuments(env, { sort: 'oldest' })), ['d1', 'd2', 'd3', 'd4', 'd5'])
-  // Before 0005: NOCASE folds ASCII only, so "Čokolada" sorts after Z.
+  // Before 0007: NOCASE folds ASCII only, so "Čokolada" sorts after Z.
   assert.deepEqual(ids(await listDocuments(env, { sort: 'title' })), ['d4', 'd1', 'd3', 'd2', 'd5'])
 })
 
-test('after 0005, titles sort in Slovenian order', async () => {
-  const { env } = seeded('0005')
+test('after 0007, titles sort in Slovenian order', async () => {
+  const { env } = seeded('0007')
   // Čokolada sits after any c… title and before d…; here, between alpha and Invoice.
   assert.deepEqual(ids(await listDocuments(env, { sort: 'title' })), ['d4', 'd5', 'd1', 'd3', 'd2'])
 })
 
-test('the 0005 backfill builds the same sort key as new saves', () => {
+test('the 0007 backfill builds the same sort key as new saves', () => {
   const titles = ['Čokolada', 'ćevapi', 'Đuro', 'Šola', 'žaga', 'Zebra', 'Café Ölung', 'CZ', 'Éclair', 'cesta']
   const sqlite = new DatabaseSync(':memory:')
   sqlite.exec(initSql)
@@ -122,26 +125,37 @@ test('the 0005 backfill builds the same sort key as new saves', () => {
   titles.forEach((title, index) => {
     sqlite.prepare('INSERT INTO documents (id, title, body, created_at) VALUES (?, ?, ?, ?)').run(`t${index}`, title, 'b', '2024-01-01')
   })
-  sqlite.exec(uploadsSql)
+  applyLater(sqlite)
   const rows = sqlite.prepare('SELECT title, title_sort FROM documents ORDER BY title_sort').all() as Array<{ title: string, title_sort: string }>
   for (const row of rows) assert.equal(row.title_sort, slovenianSortKey(row.title), row.title)
   assert.deepEqual(rows.map(row => row.title), ['Café Ölung', 'cesta', 'CZ', 'Čokolada', 'ćevapi', 'Đuro', 'Éclair', 'Šola', 'Zebra', 'žaga'])
 })
 
-test('after 0005, search covers file names and uploaders', async () => {
-  const { env } = seeded('0005')
+test('after 0007, rows written without a sort key get one from the trigger', () => {
+  const { sqlite } = seeded('0007')
+  // As older code or a plain SQL insert would: no title_sort column in the insert.
+  sqlite.prepare('INSERT INTO documents (id, title, body, created_at) VALUES (?, ?, ?, ?)').run('d6', 'Žaga', 'b', '2024-08-01')
+  assert.equal((sqlite.prepare('SELECT title_sort FROM documents WHERE id = ?').get('d6') as { title_sort: string }).title_sort, slovenianSortKey('Žaga'))
+  // A rename keeps the key in step; a key set by the app is left alone.
+  sqlite.prepare('UPDATE documents SET title = ? WHERE id = ?').run('Čebula', 'd6')
+  assert.equal((sqlite.prepare('SELECT title_sort FROM documents WHERE id = ?').get('d6') as { title_sort: string }).title_sort, slovenianSortKey('Čebula'))
+  sqlite.prepare('INSERT INTO documents (id, title, body, created_at, title_sort) VALUES (?, ?, ?, ?, ?)').run('d7', 'Éclair', 'b', '2024-08-01', 'custom')
+  assert.equal((sqlite.prepare('SELECT title_sort FROM documents WHERE id = ?').get('d7') as { title_sort: string }).title_sort, 'custom')
+})
+
+test('after 0007, search covers file names and uploaders', async () => {
+  const { env } = seeded('0007')
   // Accent-free prefix finds "Poročilo Q2.docx" through the rebuilt FTS index.
   assert.deepEqual(ids(await listDocuments(env, { q: 'porocilo' })), ['d2'])
   assert.deepEqual(ids(await listDocuments(env, { q: 'recept.txt' })), ['d5'])
   assert.deepEqual(ids(await listDocuments(env, { q: 'janez.novak' })), ['d3', 'd2'])
   const [doc] = (await listDocuments(env, { q: 'invoice' })).documents
-  assert.equal(doc?.fileName, 'Invoice_2024_03.pdf')
-  assert.equal(doc?.fileSize, 2048)
+  assert.deepEqual(doc?.source, { filename: 'Invoice_2024_03.pdf', contentType: null, size: 2048, url: '/api/documents/d1/source' })
   assert.equal(doc?.uploadedBy, 'maja.zupan@kaldi.si')
 })
 
 test('after 0005, filters by uploader, separately from author', async () => {
-  const { env } = seeded('0005')
+  const { env } = seeded('0007')
   assert.deepEqual(ids(await listDocuments(env, { uploadedBy: 'janez.novak@kaldi.si' })), ['d3', 'd2'])
   assert.deepEqual(ids(await listDocuments(env, { uploadedBy: 'janez.novak@kaldi.si', author: 'Maja Župan' })), ['d3'])
   // Before 0005 nobody is recorded as an uploader.
@@ -191,7 +205,7 @@ test('works before migration 0002: LIKE search, no authors', async () => {
 })
 
 test('lists authors and uploaders with document counts, in Slovenian order', async () => {
-  const { env, sqlite } = seeded('0005')
+  const { env, sqlite } = seeded('0007')
   sqlite.prepare("UPDATE documents SET author = 'Črt Zupan' WHERE id = 'd4'").run()
   assert.deepEqual(await listDocumentFacets(env), {
     authors: [

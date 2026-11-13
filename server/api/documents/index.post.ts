@@ -1,9 +1,10 @@
 import type { AccessUser } from '../../utils/cloudflare-access'
-import { extractFileText, titleFromFilename } from '../../utils/document-file'
-import { saveDocument, type UploadedFileInfo } from '../../utils/documents'
+import { extractFileText, fileExtension, FILE_MAX_BYTES, isConvertible, titleFromFilename } from '../../utils/document-file'
+import { toSourceFile, type SourceFile } from '../../utils/document-storage'
+import { saveDocument } from '../../utils/documents'
 import { readCloudflareEnv, requireEnv, requireOpenRouterApiKey, toHttpError } from '../../utils/env'
 
-async function readDocumentInput (event: Parameters<typeof readBody>[0]) {
+async function readDocumentInput (event: Parameters<typeof readBody>[0]): Promise<{ title: string, body: string, author: string, source?: SourceFile }> {
   const contentType = getHeader(event, 'content-type') || ''
   if (contentType.includes('multipart/form-data')) {
     const parts = await readMultipartFormData(event)
@@ -29,15 +30,26 @@ async function readDocumentInput (event: Parameters<typeof readBody>[0]) {
       if (part.name === 'body' && !body) body = text
       if (part.name === 'file' && part.data.length > 0) file = part
     }
-    let fileInfo: UploadedFileInfo | null = null
     if (file) {
-      const name = fileName.trim() || file.filename || ''
-      // PDF, Word, and Excel files are converted to markdown by Workers AI.
-      body = await extractFileText({ ...file, filename: name || file.filename }, readCloudflareEnv(event)?.AI)
-      if (!title.trim() && name) title = titleFromFilename(name)
-      fileInfo = { name, size: file.data.length, type: file.type }
+      const named = { ...file, filename: fileName.trim() || file.filename }
+      // .md and .txt are read in the browser (with encoding detection), and the
+      // person may edit that text before saving, so their body wins. Everything
+      // else, and a text file sent without a body, is extracted here.
+      const browserText = body.trim() && !isConvertible(named.filename) && fileExtension(named.filename) !== 'csv'
+      if (browserText) {
+        if (named.data.byteLength > FILE_MAX_BYTES) {
+          const message = `File must be ${FILE_MAX_BYTES / 1024 / 1024} MB or smaller`
+          throw createError({ statusCode: 413, statusMessage: message, data: { message } })
+        }
+      } else {
+        // PDF, Word, and Excel files are converted to markdown by Workers AI.
+        body = await extractFileText(named, readCloudflareEnv(event)?.AI)
+      }
+      if (!title.trim() && named.filename) title = titleFromFilename(named.filename)
+      // Kept in R2 next to the markdown so the original can be downloaded later.
+      return { title, body, author, source: toSourceFile(named) }
     }
-    return { title, body, author, file: fileInfo }
+    return { title, body, author }
   }
 
   const payload = await readBody(event)
@@ -48,24 +60,23 @@ async function readDocumentInput (event: Parameters<typeof readBody>[0]) {
       data: { message: 'Expected JSON { title, body }' }
     })
   }
-  const record = payload as { title?: unknown, body?: unknown, author?: unknown, file?: unknown }
-  // Text files are read in the browser and sent as JSON; `file` describes the original.
-  const file = record.file && typeof record.file === 'object' ? record.file as UploadedFileInfo : null
+  const record = payload as { title?: unknown, body?: unknown, author?: unknown }
   return {
     title: typeof record.title === 'string' ? record.title : '',
     body: typeof record.body === 'string' ? record.body : '',
-    author: typeof record.author === 'string' ? record.author : '',
-    file
+    author: typeof record.author === 'string' ? record.author : ''
   }
 }
 
 export default defineEventHandler(async (event) => {
   try {
     const input = await readDocumentInput(event)
-    // Set by the site-password middleware only after it verifies a Cloudflare
-    // Access assertion. In shared-password mode nobody is identified.
-    const uploader = (event.context.korwellAccessUser as AccessUser | undefined) ?? null
-    return await saveDocument(requireEnv(event), requireOpenRouterApiKey(event), { ...input, uploader })
+    // Set by the Cloudflare Access middleware after it verifies the JWT. Shared-password mode has no identity.
+    const uploadedBy = (event.context.korwellAccessUser as AccessUser | undefined)?.email ?? null
+    const saved = await saveDocument(requireEnv(event), requireOpenRouterApiKey(event), { ...input, uploadedBy })
+    // Count the saved text, including text extracted from uploaded files.
+    const wordCount = input.body.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0
+    return { ...saved, wordCount }
   } catch (error) {
     throw toHttpError(error)
   }

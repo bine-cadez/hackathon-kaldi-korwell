@@ -11,5 +11,9 @@ export function sqliteD1 () {
       all: async <T>() => ({ results: db.prepare(sql).all(...(params as never[])) as T[] })
     }
   }
-  return { prepare: (sql: string) => statement(sql), raw: db }
+  return {
+    prepare: (sql: string) => statement(sql),
+    batch: async (statements: Array<{ run: () => Promise<unknown> }>) => Promise.all(statements.map(item => item.run())),
+    raw: db
+  }
 }

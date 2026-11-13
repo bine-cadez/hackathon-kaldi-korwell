@@ -2,7 +2,9 @@
 
 Hackathon v1 of an internal document library. Someone pastes or uploads a text or markdown note, uploads a CSV, or uploads a PDF, Word (`.docx`), or Excel (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`) file. Workers AI converts those files to markdown first. On save the app chunks the text, calls OpenRouter for embeddings, stores the document and chunks in Cloudflare D1, and stores the vectors in Cloudflare Vectorize. Search embeds the query and returns the closest chunks with the source document title. After migration `0002`, search also matches title, author, and body with SQLite FTS5 and can limit results to a created-at date range.
 
-Chat is not in this version. Nothing is embedded until a person uploads it.
+The **Ask** page (`/chat`) answers questions about the archive. `POST /api/chat` sends the conversation to an OpenRouter chat model with the same tools the MCP server exposes (`search`, `fetch`, and `search_slack` once the Slack archive exists). The model chooses which to call, the Worker runs them in-process, and the answer streams back as newline-delimited JSON with links to its sources. The default model is `anthropic/claude-haiku-5.5`, the cheapest Claude on OpenRouter. Set `CHAT_MODEL` to any OpenRouter model id that supports tool calling to change it. It uses the same `OPENROUTER_API_KEY` as embeddings. Each question makes at most six model calls, and conversations are not stored.
+
+Nothing is embedded until a person uploads it.
 
 A shared password (`SITE_PASSWORD`) locks HTML pages and the data APIs when it is set. Leave it unset and the app stays open, which is the local/dev default. `GET /api/health` stays public either way. `public/robots.txt` disallows every crawler, and every response sends `X-Robots-Tag: noindex, nofollow`. [Cloudflare Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/) can replace this gate later. This repo does not enable Access. A `workers.dev` hostname is reachable until one of those gates is on.
 
@@ -62,7 +64,9 @@ npm test
 | `SLACK_SIGNING_SECRET` | Slack app signing secret. Unset = `POST /api/slack/events` returns not configured. Production: `npx wrangler secret put SLACK_SIGNING_SECRET` |
 | `SLACK_BOT_TOKEN`    | Bot token (`xoxb-…`) for `users.info`, history, and permalinks. Unset = messages still store, names stay blank. Production: `npx wrangler secret put SLACK_BOT_TOKEN` |
 | `SLACK_CHANNEL_IDS`  | Comma-separated allow list (`C…`, `G…`). Empty = archive nothing. Production: `npx wrangler secret put SLACK_CHANNEL_IDS` |
+| `DUPLICATE_CHECK`    | Optional. `off` allows duplicate uploads (testing). Unset = duplicates are refused. See [Duplicate uploads](#duplicate-uploads). |
 | `MCP_SIGNING_KEY`    | Signs MCP OAuth tokens. At least 32 characters. Empty disables `/mcp`. Production: `npx wrangler secret put MCP_SIGNING_KEY` |
+| `CHAT_MODEL`         | Optional. OpenRouter model id for the Ask page. Empty = `anthropic/claude-haiku-5.5`. Production: `npx wrangler secret put CHAT_MODEL` |
 
 Do not commit the key. Do not put it in `wrangler.jsonc`. Placeholders only live in `.env.example` and `.dev.vars.example`.
 
@@ -199,9 +203,10 @@ npm run cf:provision
 
 Then:
 
-1. Paste the real D1 `database_id` over `00000000-0000-0000-0000-000000000000` in `wrangler.jsonc` and commit that change to `main`. The placeholder id will not deploy.
-2. `npx wrangler secret put OPENROUTER_API_KEY` and, to lock the site, `npx wrangler secret put SITE_PASSWORD` (once; later deploys leave both in place). Skip `SITE_PASSWORD` only when this copy should stay open.
-3. Merge this workflow to `main`, with the two GitHub secrets set. The next push to `main` (or a manual run) applies `migrations/0001_init.sql` if it is not already applied, then deploys.
+1. The R2 bucket must exist before deploy (`npx wrangler r2 bucket create doc-library`, part of `cf:provision`). R2 must be enabled on the account once in the dashboard. A missing bucket fails the deploy.
+2. Paste the real D1 `database_id` over `00000000-0000-0000-0000-000000000000` in `wrangler.jsonc` and commit that change to `main`. The placeholder id will not deploy.
+3. `npx wrangler secret put OPENROUTER_API_KEY` and, to lock the site, `npx wrangler secret put SITE_PASSWORD` (once; later deploys leave both in place). Skip `SITE_PASSWORD` only when this copy should stay open.
+4. Merge this workflow to `main`, with the two GitHub secrets set. The next push to `main` (or a manual run) applies `migrations/0001_init.sql` if it is not already applied, then deploys.
 
 You can still deploy by hand with `npm run db:migrate:remote` and `npm run deploy` (`nuxt build && wrangler --cwd .output deploy`). Nitro writes the Worker entry into `.output/server/wrangler.json`. Migrations stay on the root config because `.output` does not contain `migrations/`.
 
@@ -237,7 +242,47 @@ Limits and errors:
 - The converted text still has to fit the v1 limits: about 200k characters and 48 chunks. Depending on paragraph breaks, that is roughly 35k–55k characters, often 10–20 PDF pages. A longer file returns **413** and has to be split.
 - A PDF with no text layer (a scan) converts to nothing and returns **422** `No text found`. There is no OCR.
 - If Workers AI reports a conversion error, the route returns **422** with that message. If the call itself fails, it returns **502**. If the binding is missing, it returns **503**.
-- Only the extracted text is stored. The original file is not kept.
+- The extracted text is what gets chunked and searched. The original file is also kept, see [Original files and uploader](#original-files-and-uploader).
+
+## Original files and uploader
+
+Every file upload keeps the file exactly as it was sent, next to its markdown, in the R2 bucket `doc-library` (binding `BLOB`):
+
+```text
+documents/<id>/original.<ext>   the uploaded PDF, Word, Excel, CSV, or text file
+documents/<id>/content.md       the markdown that was chunked and embedded
+```
+
+`migrations/0005_document_source.sql` adds nullable columns to `documents`:
+
+| Column | Meaning |
+| ------ | ------- |
+| `uploaded_by` | Email of the person who uploaded it, from the verified Cloudflare Access JWT. Never read from the request. `NULL` in shared-password or open mode, because there is no identity there. |
+| `source_key`, `source_filename`, `source_content_type`, `source_size` | Where the original lives in R2, its cleaned filename, type, and size. `NULL` for pasted text. |
+
+The upload time is the existing `created_at`.
+
+- The original is written first. If R2 rejects it, the upload returns **502** and nothing is saved. If the D1 or Vectorize step fails afterwards, the R2 objects are removed again.
+- `GET /api/documents/:id/source` downloads the original as an attachment with its original (UTF-8) filename. The content type comes from the file extension, not from the browser, and is sent with `X-Content-Type-Options: nosniff`. It is behind the same Access or password gate as the rest of `/api`.
+- `GET /api/documents` and `GET /api/documents/:id` return `uploadedBy` and `source` (`filename`, `contentType`, `size`, `url`). The Library page and the search result detail show "Uploaded <date> by <email>" plus a link to the original. MCP `fetch` adds `uploaded_by` and `original_filename` to its metadata.
+- Deleting a document removes everything under `documents/<id>/`.
+- Before `0005` is applied (PR previews share production D1), uploads still work and the original is still put in R2, but the row does not point to it and the uploader is not recorded.
+- `npm run dev` uses Wrangler's local R2 simulator, so no login is needed. Documents uploaded before this change have no original.
+
+## Duplicate uploads
+
+`migrations/0006_document_content_hash.sql` adds `documents.content_hash`, a SHA-256 of the normalized body (the text that gets chunked: CRLF to LF, trimmed). Before any embedding call, `POST /api/documents` looks for an existing document with the same hash. On a match it returns **409** with `{ data: { message, duplicate: { id, title, createdAt } } }`, and the upload page shows a warning that links to the existing document's page (`/library/<id>`). Nothing is embedded or stored.
+
+Because the hash is taken from the extracted text, the same file renamed, uploaded with another title, or pasted as text also matches. Two different files that convert to the same text match as well.
+
+| `DUPLICATE_CHECK` | Behavior |
+| --- | --- |
+| Unset, empty, or anything else | On (default). |
+| `off`, `false`, `0`, `no` | Off. Duplicates are saved. The hash is still stored, so turning the check back on also covers documents uploaded in the meantime. |
+
+For `npm run dev`, set it in `.env` and restart. In production, set it as a Worker variable in the dashboard or with `npx wrangler secret put DUPLICATE_CHECK`. `GET /api/health` reports `duplicateCheck`.
+
+Documents saved before `0006` have no hash. Each duplicate check first hashes up to 50 of them in one D1 batch, so an older library is covered after a few uploads. Until `0006` is applied (PR previews do not run migrations), no hash is written and the check is skipped. Saves work as before.
 
 ## Keyword search and dates
 
@@ -267,21 +312,21 @@ npx wrangler d1 execute DB --local --command "SELECT document_id, author FROM do
 
 `GET /api/documents` returns one page of the Library: `{ documents, total, page, pageSize, totalPages }`. Query parameters, all optional: `q` (words in the title, author, file name, or uploader email; prefix and accent-insensitive with FTS5, substring otherwise), `author` (exact name), `uploadedBy` (exact uploader email), `from` and `to` (inclusive UTC dates, `YYYY-MM-DD`), `sort` (`newest`, `oldest`, or `title`), `page` (from 1), and `pageSize` (1–100, default 20). Invalid values return 400. `GET /api/documents/facets` returns `{ authors, uploaders }`, each name with a document count, for the Library's Author and Uploaded by filters. The Library page keeps the same filters in its URL (`/library?q=…&author=…&uploader=…&page=2`). Each document has its own page at `/library/<id>`; the search page keeps its query in the URL too (`/?q=…&author=…`), so Back from a document returns to the results.
 
-### Uploader, file name, and Slovenian text
+### Sorting, file-name search, and Slovenian text
 
-Migration `0005_document_uploads.sql` adds, per document:
+The uploader (`uploaded_by`) and the original file (`source_*`) come from `0005_document_source.sql` above. `author` (from 0002) stays a separate, optional field: who wrote the document, not who uploaded it. `migrations/0007_document_title_sort.sql` adds:
 
-- `uploaded_by` and `uploaded_by_id`: the email and subject of the signed-in **Cloudflare Access** user. They are taken from the verified Access assertion, never from the request body. In shared-password mode nobody is identified, so both stay NULL. Turn on Access (see [Kaldi email sign-in with Cloudflare Access](#kaldi-email-sign-in-with-cloudflare-access)) to record uploaders.
-- `file_name`, `file_size`, `file_type`: the original file as picked. NULL for pasted text. The file name is also indexed in `documents_fts`.
-- `author` (from 0002) stays a separate, optional field: who wrote the document, not who uploaded it.
-- `title_sort`: a sort key in Slovenian alphabet order (c < č < ć < d … z < ž). SQLite compares bytes, so without it Č, Š, Ž sort after Z.
+- `title_sort`: a sort key in Slovenian alphabet order (c < č < ć < d … z < ž), backfilled for existing rows. SQLite compares bytes, so without it Č, Š, Ž sort after Z.
+- Indexes for the Library's Title A–Z sort and its Author and Uploaded by filters.
+- A rebuilt `documents_fts` with the original file name (`source_filename`) as a fifth column, so the Library search finds "Poročilo_2024.pdf" from "porocilo". The update trigger now fires only when indexed text changes, not on `r2_key` or `content_hash` updates.
 
 D1 stores UTF-8, so Slovenian letters are stored as they are. Two things are handled on the way in (`shared/utils/text.ts`):
 
-- **Encoding.** Text and CSV files that are not valid UTF-8 are decoded as Windows-1250 (what Excel and Notepad write on Slovenian Windows) or ISO-8859-2. UTF-16 files with a byte order mark are decoded too. The upload form says when it converted a file.
+- **Encoding.** Text and CSV files that are not valid UTF-8 are decoded as Windows-1250 (what Excel and Notepad write on Slovenian Windows) or ISO-8859-2. UTF-16 files with a byte order mark are decoded too. The upload form says when it converted a file. Text files are uploaded with their original too, so they get an R2 copy and a download link like PDFs.
 - **Normalization.** Titles, authors, file names, bodies, and filter values are stored in Unicode NFC, so a "č" sent as "c" plus a combining caron (common in macOS file names) equals a typed "č".
+- **File names with `;` or `=`.** The upload form sends the name in its own `fileName` field, because h3's multipart parser splits `Content-Disposition` on those characters.
 
-Like 0002, the code detects the 0005 columns and keeps working before the migration runs. Apply it with `npm run db:migrate:local` / `npm run db:migrate:remote` (the deploy workflow applies remote migrations).
+Like 0002 and 0005, the code detects the 0007 changes and keeps working before the migration runs. The deploy workflow applies remote migrations on merge.
 
 Other routes: `GET /api/documents/:id`, `DELETE /api/documents/:id`, `GET /api/health`, and the MCP routes below. With `SITE_PASSWORD` set, direct calls to the document and search routes return 401 before any embedding request. Health stays public. `POST /api/auth/login` checks the password and sets the cookie.
 
@@ -327,6 +372,8 @@ migrations/0001_init.sql
 migrations/0002_document_search.sql   author column and FTS5
 migrations/0003_slack_archive.sql
 migrations/0004_mcp_used_codes.sql    single-use MCP authorization codes
+migrations/0006_document_content_hash.sql   duplicate upload detection
+migrations/0007_document_title_sort.sql     Slovenian title sort, file names in FTS
 docs/slack-app-manifest.yml
 server/api/             upload, list, search, Slack events
 server/routes/          MCP endpoint and OAuth authorize, token, register

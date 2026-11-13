@@ -5,6 +5,7 @@ import { parseUtcDateRange } from './date-range'
 import type { UtcDateRange } from './date-range'
 import type { DocLibraryEnv } from './env'
 import { quoteFtsToken } from './fts'
+import { rowSource, sourceSelect } from './documents'
 import { ensureSchema } from './schema'
 import { normalizeUnicode } from '../../shared/utils/text'
 
@@ -40,9 +41,8 @@ export interface LibraryDocumentSummary {
   title: string
   author: string | null
   uploadedBy: string | null
-  fileName: string | null
-  fileSize: number | null
-  fileType: string | null
+  // The uploaded original in R2 (migration 0005_document_source.sql).
+  source: ReturnType<typeof rowSource>
   createdAt: string
   r2Key: string | null
   chunkCount: number
@@ -71,9 +71,10 @@ interface DocumentListRow {
   title: string
   author: string | null
   uploaded_by: string | null
-  file_name: string | null
-  file_size: number | null
-  file_type: string | null
+  source_key: string | null
+  source_filename: string | null
+  source_content_type: string | null
+  source_size: number | null
   created_at: string
   r2_key: string | null
   chunk_count: number
@@ -131,14 +132,14 @@ function escapeLike (value: string): string {
 // Each word must appear in the title, author, file name, or uploader email.
 // Two ways to match, OR-ed:
 // - FTS5 prefix match: "zup" finds "Župan" (diacritics folded), "inv" finds "Invoice".
-// - LIKE substring: "port" finds "Report", and it works before migrations 0002/0005.
+// - LIKE substring: "port" finds "Report", and it works before migrations 0002/0005/0007.
 function textFilter (q: string, caps: SearchCapabilities): { sql: string, params: string[] } | null {
   if (!q) return null
   const tokens = queryTokens(q)
   const words = tokens.length > 0 ? tokens : [q]
   const columns = ['d.title']
   if (caps.author) columns.push('d.author')
-  if (caps.uploads) columns.push('d.file_name', 'd.uploaded_by')
+  if (caps.source) columns.push('d.source_filename', 'd.uploaded_by')
   const like = words
     .map(() => `(${columns.map(column => `${column} LIKE ? ESCAPE '\\'`).join(' OR ')})`)
     .join(' AND ')
@@ -149,7 +150,8 @@ function textFilter (q: string, caps: SearchCapabilities): { sql: string, params
   if (!caps.fts || tokens.length === 0) {
     return { sql: `(${like})`, params: likeParams }
   }
-  const ftsColumns = caps.uploads ? '{title author file_name}' : '{title author}'
+  // 0007 rebuilt documents_fts with the original file name.
+  const ftsColumns = caps.titleSort ? '{title author file_name}' : '{title author}'
   const match = tokens.map(token => `${ftsColumns} : ${quoteFtsToken(token)}*`).join(' AND ')
   return {
     sql: `(d.id IN (SELECT document_id FROM documents_fts WHERE documents_fts MATCH ?) OR (${like}))`,
@@ -160,8 +162,8 @@ function textFilter (q: string, caps: SearchCapabilities): { sql: string, params
 function orderBy (sort: ListSort, caps: SearchCapabilities): string {
   if (sort === 'oldest') return 'd.created_at ASC, d.id ASC'
   // title_sort puts Č after C and Ž after Z (see slovenianSortKey). Before
-  // migration 0005, NOCASE folds ASCII only and accented initials sort last.
-  if (sort === 'title') return `${caps.uploads ? 'd.title_sort' : 'd.title COLLATE NOCASE'} ASC, d.created_at DESC, d.id DESC`
+  // migration 0007, NOCASE folds ASCII only and accented initials sort last.
+  if (sort === 'title') return `${caps.titleSort ? 'd.title_sort' : 'd.title COLLATE NOCASE'} ASC, d.created_at DESC, d.id DESC`
   return 'd.created_at DESC, d.id DESC'
 }
 
@@ -193,7 +195,7 @@ export async function listDocuments (env: DocLibraryEnv, query: Partial<Document
     params.push(options.author)
   }
   if (options.uploadedBy) {
-    if (!caps.uploads) return empty()
+    if (!caps.source) return empty()
     where.push('d.uploaded_by = ?')
     params.push(options.uploadedBy)
   }
@@ -207,9 +209,7 @@ export async function listDocuments (env: DocLibraryEnv, query: Partial<Document
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
   const authorSelect = caps.author ? 'd.author' : 'NULL AS author'
-  const uploadSelect = caps.uploads
-    ? 'd.uploaded_by, d.file_name, d.file_size, d.file_type'
-    : 'NULL AS uploaded_by, NULL AS file_name, NULL AS file_size, NULL AS file_type'
+  const uploadSelect = sourceSelect(caps.source, 'd.')
   const offset = (options.page - 1) * options.pageSize
 
   // Chunk counts come from a correlated subquery so only the rows on this page
@@ -235,9 +235,7 @@ export async function listDocuments (env: DocLibraryEnv, query: Partial<Document
       title: row.title,
       author: row.author ?? null,
       uploadedBy: row.uploaded_by ?? null,
-      fileName: row.file_name ?? null,
-      fileSize: row.file_size === null || row.file_size === undefined ? null : Number(row.file_size),
-      fileType: row.file_type ?? null,
+      source: rowSource(row),
       createdAt: row.created_at,
       r2Key: row.r2_key,
       chunkCount: Number(row.chunk_count)
@@ -268,7 +266,7 @@ export async function listDocumentFacets (env: DocLibraryEnv): Promise<DocumentF
   const caps = await readSearchCapabilities(env.DB)
   const [authors, uploaders] = await Promise.all([
     caps.author ? facet(env, 'author') : [],
-    caps.uploads ? facet(env, 'uploaded_by') : []
+    caps.source ? facet(env, 'uploaded_by') : []
   ])
   return { authors, uploaders }
 }

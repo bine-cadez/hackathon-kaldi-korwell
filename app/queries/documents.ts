@@ -1,16 +1,22 @@
 import { defineQueryOptions } from '@pinia/colada'
 import { libraryApiQuery, type LibraryFilters } from '~/utils/libraryFilters'
 
+// The file as it was uploaded, kept in R2 next to the markdown.
+export interface DocumentSource {
+  filename: string
+  contentType: string | null
+  size: number | null
+  url: string
+}
+
 export interface LibraryDocument {
   id: string
   title: string
   author?: string | null
   uploadedBy?: string | null
-  fileName?: string | null
-  fileSize?: number | null
-  fileType?: string | null
   createdAt: string
   r2Key: string | null
+  source?: DocumentSource | null
   chunkCount: number
 }
 
@@ -37,12 +43,10 @@ export interface DocumentDetail {
   title: string
   author?: string | null
   uploadedBy?: string | null
-  fileName?: string | null
-  fileSize?: number | null
-  fileType?: string | null
   body: string
   createdAt: string
   r2Key: string | null
+  source?: DocumentSource | null
   chunks: Array<{ id: string, chunkIndex: number, content: string }>
 }
 

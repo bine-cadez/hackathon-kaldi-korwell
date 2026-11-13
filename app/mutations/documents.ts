@@ -14,6 +14,7 @@ export interface SavedDocument {
   title: string
   chunkCount: number
   r2Key: string | null
+  wordCount: number
 }
 
 function invalidateLists (queryCache: ReturnType<typeof useQueryCache>) {

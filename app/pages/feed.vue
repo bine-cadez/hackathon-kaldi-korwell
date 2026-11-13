@@ -63,6 +63,8 @@ const fileInput = ref<HTMLInputElement | null>(null)
 
 // The file currently attached (by drop or picker). Nothing is uploaded until Save.
 const pickedName = ref('')
+// The eye blinks once when a file is attached: noted.
+watch(pickedName, (name) => { if (name) mainEye.value?.blink() })
 const pickedIsText = ref(false)
 // A text file picked into the body. It is uploaded too, so its original is kept.
 const pickedFile = ref<File | null>(null)
@@ -160,6 +162,21 @@ function takeFile (file: File) {
 const dragDepth = ref(0)
 const dragging = computed(() => dragDepth.value > 0)
 
+// How the eye reacts to the upload: it locks onto a dragged file, reads while
+// saving, is pleased once fed, and narrows at an error. The Panem finale drives
+// the eye itself, so it has no mood then.
+const mainEye = ref<{ lookAt: (clientX: number, clientY: number) => void, blink: () => void } | null>(null)
+// How full the small eyes are (0 to 1), reported by PanemRewards.
+const eyeAppetite = ref(0)
+const eyeMood = computed(() => {
+  if (eyeTravel.value || eyeBlackHole.value) return 'idle'
+  if (uploading.value) return 'reading'
+  if (openingLibrary.value) return 'pleased'
+  if (dragging.value && !uploadLocked.value) return 'hungry'
+  if (fileError.value || saveError.value) return 'alarmed'
+  return 'idle'
+})
+
 function hasFiles (event: DragEvent) {
   return Array.from(event.dataTransfer?.types || []).includes('Files')
 }
@@ -176,6 +193,8 @@ function onDragOver (event: DragEvent) {
   if (!hasFiles(event)) return
   event.preventDefault()
   if (event.dataTransfer) event.dataTransfer.dropEffect = uploadLocked.value ? 'none' : 'copy'
+  // Pointer events stop during a drag, so the eye follows the file from here.
+  mainEye.value?.lookAt(event.clientX, event.clientY)
 }
 
 function onDragLeave (event: DragEvent) {
@@ -258,7 +277,10 @@ async function saveDocument () {
     <div class="mx-auto w-[min(44rem,calc(100%-2rem))] pt-12 pb-10">
       <div ref="feedEye" class="feed-heading text-center">
         <ArchiveEye
+          ref="mainEye"
           class="w-44"
+          :mood="eyeMood"
+          :appetite="eyeAppetite"
           :class="{ 'feed-eye-travelling': eyeTravel }"
           :style="eyeMotionStyle"
           :black-hole="eyeBlackHole"
@@ -394,6 +416,7 @@ async function saveDocument () {
         :replay="replayIntro"
         @eye-travel="eyeTravel = $event"
         @eye-black-hole="eyeBlackHole = $event"
+        @appetite="eyeAppetite = $event"
       />
     </ClientOnly>
   </main>

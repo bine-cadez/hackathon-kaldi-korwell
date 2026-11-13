@@ -1,333 +1,360 @@
 <script setup lang="ts">
-import { useQuery } from '@pinia/colada'
-import { SEARCH_QUERY_KEYS, documentPath, documentSearchQuery, type SearchMatch, type SearchParams } from '~/queries/documents'
+interface ChatSource {
+  kind: 'document' | 'slack'
+  title: string
+  url: string
+  detail?: string
+}
 
-// Excerpts from Nineteen Eighty-Four, Parts I–III and the Newspeak appendix.
-const archiveQuotes = [
-  'The best books, he perceived, are those that tell you what you know already.',
-  'The heresy of heresies was common sense.',
-  'Sanity is not statistical',
-  'I understand HOW',
-  'understand WHY',
-  'The solid world exists',
-  'a taste for solitude',
-  'ownlife',
-  'real coffee',
-  'a tiny world',
-  'thoughts to words',
-  'human heritage',
-  'profound wisdom',
-  'the clocks were striking thirteen',
-  'BIG BROTHER IS WATCHING YOU',
-  'a time when thought is free',
-  'To mark the paper was the decisive act.',
-  'the place where there is no darkness',
-  'a link of understanding between them',
-  'the memory of the lost chocolate',
-  'To know and not to know',
-  'the labyrinthine world of doublethink',
-  'to use logic against logic',
-  'no record outside your own memory',
-  'the destruction of words',
-  'the range of thought',
-  'the range of consciousness',
-  'Newspeak is Ingsoc and Ingsoc is Newspeak',
-  'Everything faded into mist.',
-  'The past was erased',
-  'the erasure was forgotten',
-  'the lie became truth',
-  'unmistakable evidence of an act of falsification',
-  'Freedom is the freedom to say that two plus two make four.',
-  'If that is granted, all else follows.',
-  'All history was a palimpsest',
-  'I love you.',
-  'a scrap of paper',
-  'the memory hole',
-  'the Golden Country',
-  'a sort of vague reverence',
-  'at the heart of the crystal',
-  'no ear at the keyhole',
-  'poverty and ignorance',
-  'the possibility of independent thought',
-  'Thus history is continuously rewritten.',
-  'Who controls the present controls the past',
-  'In records. It is written down.',
-  'In the mind. In human memories.',
-  'the eyes of the Party',
-  'The object of power is power.',
-  'Obedience is not enough.',
-  'TWO AND TWO MAKE FIVE',
-  'Oldspeak',
-  'crimethink',
-  'thinkpol',
-  'goodthink',
-  'All ambiguities and shades of meaning',
-  'a sort of verbal shorthand',
-  'duckspeak',
-  'Big Brother is ungood',
-  'the last link with the past',
-  'in full control of all records'
+interface ToolActivity {
+  id: string
+  name: string
+  input: Record<string, unknown>
+  done: boolean
+  ok: boolean
+  count: number
+  title?: string
+}
+
+interface ChatTurn {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  tools: ToolActivity[]
+  sources: ChatSource[]
+  status: 'streaming' | 'done' | 'stopped' | 'error'
+  error?: unknown
+}
+
+type ChatEvent =
+  | { type: 'text', text: string }
+  | { type: 'tool_call', id: string, name: string, input: Record<string, unknown> }
+  | { type: 'tool_result', id: string, name: string, ok: boolean, count: number, sources: ChatSource[] }
+  | { type: 'done' }
+  | { type: 'error', message: string }
+
+useHead({ title: 'Ask' })
+
+const suggestions = [
+  'What did we decide in the last project kickoff?',
+  'Summarise what was discussed on Slack last week',
+  'Which documents mention the launch checklist?'
 ]
-const archiveQuote = ref('')
+
+// useState keeps the conversation while you open a cited document and come back.
+const turns = useState<ChatTurn[]>('korwell-chat', () => [])
+const draft = ref('')
+const streaming = ref(false)
+const composer = ref<{ focus: () => void } | null>(null)
+const end = ref<HTMLElement | null>(null)
+let controller: AbortController | null = null
+
+const newId = () => Math.random().toString(36).slice(2)
+
+// Pairs whose answer failed or came back empty are left out, so the model
+// never sees two user turns in a row.
+function history () {
+  const messages: Array<{ role: 'user' | 'assistant', content: string }> = []
+  const list = turns.value
+  for (let index = 0; index < list.length; index += 1) {
+    const turn = list[index]!
+    if (turn.role !== 'user') continue
+    const answer = list[index + 1]
+    if (answer?.role === 'assistant') {
+      if (!answer.text.trim()) continue
+      messages.push({ role: 'user', content: turn.text }, { role: 'assistant', content: answer.text })
+    } else {
+      messages.push({ role: 'user', content: turn.text })
+    }
+  }
+  return messages
+}
+
+function nearBottom () {
+  return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 160
+}
+
+async function keepScrolled (follow: boolean) {
+  if (!follow) return
+  await nextTick()
+  end.value?.scrollIntoView({ block: 'end' })
+}
+
+async function readError (response: Response) {
+  let data: unknown = null
+  try {
+    data = await response.json()
+  } catch {
+    // Not JSON; the status is enough.
+  }
+  const record = (data && typeof data === 'object' ? data : {}) as { statusMessage?: string, message?: string, data?: { message?: string } }
+  return { statusCode: response.status, statusMessage: record.statusMessage, data: { message: record.data?.message || record.message || record.statusMessage } }
+}
+
+function apply (turn: ChatTurn, event: ChatEvent) {
+  if (event.type === 'text') {
+    turn.text += event.text
+  } else if (event.type === 'tool_call') {
+    turn.tools.push({ id: event.id, name: event.name, input: event.input, done: false, ok: true, count: 0 })
+  } else if (event.type === 'tool_result') {
+    const tool = turn.tools.find(item => item.id === event.id)
+    if (tool) {
+      tool.done = true
+      tool.ok = event.ok
+      tool.count = event.count
+      if (event.name === 'fetch') tool.title = event.sources[0]?.title
+    }
+    for (const source of event.sources) {
+      if (source.url && !turn.sources.some(known => known.url === source.url)) turn.sources.push(source)
+    }
+  } else if (event.type === 'done') {
+    turn.status = 'done'
+  } else if (event.type === 'error') {
+    turn.status = 'error'
+    turn.error = { statusCode: 502, data: { message: event.message } }
+  }
+}
+
+async function ask (question: string) {
+  const text = question.trim()
+  if (!text || streaming.value) return
+  draft.value = ''
+  turns.value.push({ id: newId(), role: 'user', text, tools: [], sources: [], status: 'done' })
+  const messages = history()
+  turns.value.push({ id: newId(), role: 'assistant', text: '', tools: [], sources: [], status: 'streaming' })
+  // Mutate through the reactive array so every change re-renders.
+  const turn = turns.value.at(-1)!
+  streaming.value = true
+  controller = new AbortController()
+  keepScrolled(true)
+
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ messages }),
+      signal: controller.signal
+    })
+    if (!response.ok || !response.body) throw await readError(response)
+
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { value, done } = await reader.read()
+      buffer += decoder.decode(value, { stream: !done })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+      const follow = nearBottom()
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          apply(turn, JSON.parse(line) as ChatEvent)
+        } catch {
+          // Skip a garbled line.
+        }
+      }
+      keepScrolled(follow)
+      if (done) break
+    }
+    if (turn.status === 'streaming') turn.status = 'done'
+  } catch (error) {
+    if (controller?.signal.aborted) {
+      turn.status = 'stopped'
+    } else {
+      turn.status = 'error'
+      turn.error = error
+    }
+  } finally {
+    streaming.value = false
+    controller = null
+    await nextTick()
+    composer.value?.focus()
+  }
+}
+
+function stop () {
+  controller?.abort()
+}
+
+function retry () {
+  const last = turns.value.at(-1)
+  const question = turns.value.at(-2)
+  if (last?.role !== 'assistant' || question?.role !== 'user') return
+  turns.value.splice(-2, 2)
+  ask(question.text)
+}
+
+function newChat () {
+  stop()
+  turns.value = []
+  draft.value = ''
+  nextTick(() => composer.value?.focus())
+}
+
+function quoted (value: unknown) {
+  return typeof value === 'string' && value ? `“${value}”` : ''
+}
+
+function toolLabel (tool: ToolActivity) {
+  const { input } = tool
+  if (tool.name === 'fetch') return tool.done ? (tool.ok ? `Read ${quoted(tool.title) || 'a document'}` : 'Couldn’t open a document') : 'Reading a document…'
+  const where = tool.name === 'search_slack' ? 'Slack' : 'documents'
+  const what = quoted(input.query) || quoted(input.author)
+  const channel = tool.name === 'search_slack' && typeof input.channel === 'string' && input.channel ? ` in #${input.channel.replace(/^#/, '')}` : ''
+  const range = typeof input.from === 'string' || typeof input.to === 'string' ? ` · ${input.from || '…'} – ${input.to || '…'}` : ''
+  const base = `Searched ${where}${what ? ` for ${what}` : ''}${channel}${range}`
+  if (!tool.done) return `${base}…`
+  if (!tool.ok) return `${base} · failed`
+  return `${base} · ${tool.count} ${tool.count === 1 ? 'result' : 'results'}`
+}
+
+// URLs the tools returned for this answer. Only these external links are clickable.
+function sourceUrls (turn: ChatTurn) {
+  return new Set(turn.sources.map(source => source.url))
+}
+
+// Only list the sources the answer actually links to.
+function citedSources (turn: ChatTurn) {
+  return turn.sources.filter(source => turn.text.includes(`](${source.url})`))
+}
+
+// Answer links to the app open with the router instead of reloading the page.
+function onAnswerClick (event: MouseEvent) {
+  const link = (event.target as HTMLElement | null)?.closest('a')
+  const href = link?.getAttribute('href')
+  if (!href || !href.startsWith('/') || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+  event.preventDefault()
+  navigateTo(href)
+}
+
+// Each question with its answer, shown side by side.
+const pairs = computed(() => turns.value.flatMap((turn, index) => {
+  if (turn.role !== 'user') return []
+  const next = turns.value[index + 1]
+  return [{ question: turn, answer: next?.role === 'assistant' ? next : null, last: index >= turns.value.length - 2 }]
+}))
+
+// The logo eye in the header blinks faster while Korwell answers.
+const asking = useState('korwell-asking', () => false)
+watch(streaming, (value) => { asking.value = value })
 
 onMounted(() => {
-  const key = 'korwell-archive-quote'
-  let index = 0
-  try {
-    index = (Number(sessionStorage.getItem(key) ?? -1) + 1) % archiveQuotes.length
-    sessionStorage.setItem(key, String(index))
-  } catch {
-    index = Math.floor(Math.random() * archiveQuotes.length)
-  }
-  archiveQuote.value = archiveQuotes[index] ?? archiveQuotes[0]!
+  composer.value?.focus()
+  if (turns.value.length) end.value?.scrollIntoView({ block: 'end' })
 })
-
-const route = useRoute()
-const preview = computed(() => import.meta.dev && (route.query.preview === '1' || route.query.preview === 'empty'))
-const sampleProjects = ['Atlas', 'Beacon', 'Cedar', 'Delta', 'Ember', 'Fieldwork', 'Harbor', 'Juniper', 'Northstar', 'Signal']
-const sampleNotes = [
-  ['Project overview', 'The team agreed on the initial scope and documented the decisions that still need sign-off. The next review will cover delivery dates and dependencies.'],
-  ['Launch checklist', 'Confirm the staging deployment, review the rollback steps, and ask the project lead to approve the release before notifying stakeholders.'],
-  ['Meeting notes', 'The team reviewed open questions and assigned owners. Bring an updated timeline and any unresolved dependencies to the next check-in.'],
-  ['Support handover', 'The support team should check the dashboard first, then follow the escalation path in the runbook if the issue persists.'],
-  ['Retrospective', 'The team wants to keep the weekly demos and document decisions earlier. Follow-up actions will be reviewed at the next planning session.']
-]
-
-const router = useRouter()
-const request = useRequestFetch()
-
-// The search lives in the URL (/?q=…&from=…&author=…), so results can be shared
-// and reloaded, and Back from a document page returns to them (cached).
-function queryText (value: unknown): string {
-  const raw = Array.isArray(value) ? value[0] : value
-  return typeof raw === 'string' ? raw.normalize('NFC').trim().replace(/\s+/g, ' ').slice(0, 2000) : ''
-}
-function queryDate (value: unknown): string {
-  const raw = queryText(value)
-  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : ''
-}
-const searchParams = computed((): SearchParams => ({
-  q: queryText(route.query.q),
-  from: queryDate(route.query.from),
-  to: queryDate(route.query.to),
-  title: queryText(route.query.title).slice(0, 200),
-  author: queryText(route.query.author).slice(0, 200)
-}))
-const searched = computed(() => Boolean(searchParams.value.q || searchParams.value.title || searchParams.value.author))
-
-const corpus = ref<'documents' | 'slack'>('documents')
-const corpusTabs = [
-  { label: 'Documents', value: 'documents' },
-  { label: 'Slack', value: 'slack' }
-]
-// Form fields: edited freely, applied to the URL on submit.
-const query = ref(searchParams.value.q)
-const fromDate = ref(searchParams.value.from)
-const toDate = ref(searchParams.value.to)
-const titleFilter = ref(searchParams.value.title)
-const authorFilter = ref(searchParams.value.author)
-// Back/forward to another search: show its terms in the form.
-watch(searchParams, (params) => {
-  query.value = params.q
-  fromDate.value = params.from
-  toDate.value = params.to
-  titleFilter.value = params.title
-  authorFilter.value = params.author
-})
-const archiveEye = ref<{ lookAt: (x: number, y: number) => void } | null>(null)
-const queryField = ref<{ inputRef: HTMLInputElement | null } | null>(null)
-const queryInput = computed(() => queryField.value?.inputRef ?? null)
-const queryInvalid = ref(false)
-
-function previewMatches (): SearchMatch[] {
-  if (route.query.preview === 'empty') return []
-  return sampleProjects.flatMap(project => sampleNotes.map(([title, content]) => ({
-    chunkId: `preview-${project}-${title}`,
-    documentId: '',
-    title: `${project} · ${title}`,
-    chunkIndex: 0,
-    content: content!,
-    score: 0
-  })))
-}
-
-const {
-  data: searchResult,
-  error: searchError,
-  asyncStatus: searchStatus,
-  refetch: refetchSearch
-} = useQuery(() => preview.value
-  ? {
-      key: [...SEARCH_QUERY_KEYS.root, 'preview', { ...searchParams.value, preview: String(route.query.preview) }],
-      query: async () => {
-        await new Promise(resolve => setTimeout(resolve, 3000))
-        return { matches: previewMatches() }
-      },
-      enabled: searched.value
-    }
-  : { ...documentSearchQuery({ params: searchParams.value, request }), enabled: searched.value })
-const searching = computed(() => searched.value && searchStatus.value === 'loading')
-const matches = computed(() => searchResult.value?.matches ?? [])
-
-let caretFrame = 0
-let caretMeasure: CanvasRenderingContext2D | null = null
-
-function followCaret () {
-  cancelAnimationFrame(caretFrame)
-  caretFrame = requestAnimationFrame(() => {
-    const input = queryInput.value
-    if (!input || document.activeElement !== input) return
-    caretMeasure ??= document.createElement('canvas').getContext('2d')
-    if (!caretMeasure) return
-
-    const style = getComputedStyle(input)
-    const bounds = input.getBoundingClientRect()
-    const start = bounds.left + input.clientLeft + parseFloat(style.paddingLeft)
-    const end = start + input.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
-    caretMeasure.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
-    const caret = input.selectionDirection === 'backward' ? input.selectionStart : input.selectionEnd
-    const width = caretMeasure.measureText(input.value.slice(0, caret ?? 0)).width
-    const x = Math.max(start, Math.min(end, start + width - input.scrollLeft))
-    archiveEye.value?.lookAt(x, bounds.top + bounds.height / 2)
-  })
-}
-
-onMounted(() => document.addEventListener('selectionchange', followCaret))
 onBeforeUnmount(() => {
-  document.removeEventListener('selectionchange', followCaret)
-  cancelAnimationFrame(caretFrame)
+  stop()
+  asking.value = false
 })
-
-function clearQuery () {
-  query.value = ''
-  queryInvalid.value = false
-  queryInput.value?.focus()
-  followCaret()
-}
-
-function clearFilters () {
-  fromDate.value = ''
-  toDate.value = ''
-  titleFilter.value = ''
-  authorFilter.value = ''
-}
-
-function runSearch () {
-  if (searching.value) return
-  if (!query.value.trim() && !titleFilter.value.trim() && !authorFilter.value.trim()) {
-    queryInvalid.value = true
-    queryInput.value?.focus()
-    return
-  }
-  queryInvalid.value = false
-  const next: Record<string, string> = {}
-  if (query.value.trim()) next.q = query.value.trim()
-  if (fromDate.value) next.from = fromDate.value
-  if (toDate.value) next.to = toDate.value
-  if (titleFilter.value.trim()) next.title = titleFilter.value.trim()
-  if (authorFilter.value.trim()) next.author = authorFilter.value.trim()
-  if (typeof route.query.preview === 'string') next.preview = route.query.preview
-  const same = Object.keys(next).length === Object.keys(route.query).length
-    && Object.entries(next).every(([key, value]) => route.query[key] === value)
-  // The same search again means "search again"; a new one gets its own history entry.
-  if (same) refetchSearch()
-  else router.push({ query: next })
-}
 </script>
 
 <template>
-  <main class="mx-auto w-[min(46rem,calc(100%-2rem))] pt-10 pb-4">
-    <section class="text-center" aria-labelledby="korwell-title">
-      <ArchiveEye ref="archiveEye" :searching="searching" :no-results="corpus === 'documents' && searched && !searching && !searchError && !matches.length" />
-      <p class="eyebrow mx-auto mt-3 mb-4 min-h-[1.5em] leading-normal text-muted"><q v-if="archiveQuote">{{ archiveQuote }}</q></p>
-      <h1 id="korwell-title" class="mb-5 text-[clamp(4rem,13vw,7.5rem)] leading-none text-primary">Korwell</h1>
-      <UTabs
-        v-model="corpus"
-        :items="corpusTabs"
-        :content="false"
-        aria-label="What to search"
-        class="mx-auto mb-4 w-fit"
-        :ui="{ list: 'rounded-full bg-default ring ring-default', indicator: 'rounded-full bg-primary', trigger: 'rounded-full px-4 font-bold data-[state=active]:text-paper data-[state=inactive]:text-primary' }"
+  <main class="flex flex-col">
+    <section v-if="!turns.length" class="flex flex-1 flex-col items-center justify-center px-4 pt-16 pb-20 text-center" aria-labelledby="ask-title">
+      <h1 id="ask-title" class="text-[clamp(2.4rem,6vw,3.6rem)] leading-tight font-light">What do you want to know?</h1>
+      <p class="mt-3 max-w-xl text-lg leading-relaxed text-muted">Korwell searches Kaldi’s documents and Slack, and links every answer to its sources.</p>
+      <ChatComposer
+        ref="composer"
+        v-model="draft"
+        large
+        class="mt-10 w-[min(46rem,100%)] text-left"
+        :streaming="streaming"
+        placeholder="Ask about a project, a decision, a person…"
+        @submit="ask(draft)"
+        @stop="stop"
       />
-      <SlackSearch v-if="corpus === 'slack'" />
-      <form v-else class="grid gap-3.5" role="search" novalidate @submit.prevent="runSearch">
-        <SearchBar
-          ref="queryField"
-          v-model="query"
-          input-id="archive-query"
-          label="Search the records"
-          placeholder="Search the records…"
-          :searching="searching"
-          :invalid="queryInvalid"
-          :described-by="queryInvalid ? 'archive-query-error' : undefined"
-          clearable
-          inputmode="search"
-          enterkeyhint="search"
-          @input="queryInvalid = false; followCaret()"
-          @focus="followCaret"
-          @click="followCaret"
-          @keyup="followCaret"
-          @clear="clearQuery"
-        />
-        <SearchFilters :active="!!(fromDate || toDate || titleFilter || authorFilter)" @clear="clearFilters">
-          <UFormField label="From">
-            <UInput v-model="fromDate" type="date" name="from" class="w-full" />
-          </UFormField>
-          <UFormField label="To">
-            <UInput v-model="toDate" type="date" name="to" class="w-full" />
-          </UFormField>
-          <UFormField label="Title">
-            <UInput v-model="titleFilter" name="title" maxlength="200" placeholder="Words in the title" class="w-full" />
-          </UFormField>
-          <UFormField label="Author">
-            <UInput v-model="authorFilter" name="author" maxlength="200" placeholder="Words in the author" class="w-full" />
-          </UFormField>
-        </SearchFilters>
-        <p class="m-0 text-start text-sm text-muted">Dates include the whole day, in UTC.</p>
-      </form>
-      <UAlert
-        v-if="corpus === 'documents' && queryInvalid"
-        id="archive-query-error"
-        role="alert"
-        color="warning"
-        variant="subtle"
-        class="mt-3 text-start"
-        title="Enter a search term, a title, or an author."
-      />
-      <p v-if="preview" class="text-sm text-muted">Design preview · sample documents</p>
+      <ul class="mt-5 flex max-w-3xl flex-wrap justify-center gap-2" aria-label="Example questions">
+        <li v-for="suggestion in suggestions" :key="suggestion">
+          <UButton
+            color="neutral"
+            variant="outline"
+            class="bg-transparent font-light hover:bg-transparent hover:text-primary hover:ring-primary"
+            :ui="{ label: 'whitespace-normal text-start' }"
+            :label="suggestion"
+            @click="ask(suggestion)"
+          />
+        </li>
+      </ul>
     </section>
 
-    <section v-if="corpus === 'documents' && searched" class="mt-8 border-t-3 border-double border-default pt-4" aria-label="Search results" :aria-busy="searching">
-      <template v-if="searching">
-        <p role="status" class="sr-only">Searching the archive…</p>
-        <ResultSkeleton />
-      </template>
-      <ErrorState v-else-if="searchError" :error="searchError" title="Search didn’t finish" @retry="refetchSearch()" />
-      <p v-else-if="!matches.length" role="status">No matching passages found. Try a different search.</p>
-      <template v-else>
-        <h2 class="text-2xl">{{ preview ? `${matches.length} sample results` : 'From the archive' }}</h2>
-        <ol class="mt-3 grid gap-2">
-          <li v-for="match in matches" :key="match.chunkId" class="rounded-xl border border-default bg-default p-3">
-            <h3 class="text-lg">
-              <NuxtLink v-if="match.documentId" class="text-primary hover:underline hover:underline-offset-[0.2em]" :to="documentPath(match.documentId)">{{ match.title || 'Untitled' }}</NuxtLink>
-              <template v-else>{{ match.title || 'Untitled' }}</template>
-            </h3>
-            <p v-if="match.author || match.createdAt" class="mt-0.5 text-sm text-muted">
-              <span v-if="match.author">{{ match.author }}</span><span v-if="match.author && match.createdAt"> · </span><span v-if="match.createdAt">{{ match.createdAt.slice(0, 10) }}</span>
-            </p>
-            <p class="mt-2 leading-normal break-words whitespace-pre-wrap">{{ match.content || 'Passage unavailable.' }}</p>
-            <UButton
-              v-if="match.documentId"
-              class="mt-2"
-              color="neutral"
-              variant="outline"
-              label="Open document"
-              :to="documentPath(match.documentId)"
-              :aria-label="`Open ${match.title || 'document'}`"
+    <template v-else>
+      <ol class="flex-1" aria-live="polite">
+        <li v-for="pair in pairs" :key="pair.question.id" class="studio-section border-b border-default last:border-b-0">
+          <h2 class="self-start text-[1.6rem] leading-snug font-light whitespace-pre-wrap [overflow-wrap:anywhere] lg:sticky lg:top-6">{{ pair.question.text }}</h2>
+
+          <article v-if="pair.answer" class="min-w-0 max-w-3xl" :aria-busy="pair.answer.status === 'streaming'">
+            <ul v-if="pair.answer.tools.length" class="mb-4 grid gap-1" aria-label="What Korwell looked up">
+              <li
+                v-for="tool in pair.answer.tools"
+                :key="tool.id"
+                class="flex items-baseline gap-2 [overflow-wrap:anywhere]"
+                :class="tool.done && !tool.ok ? 'text-error' : 'text-muted'"
+              >
+                <UIcon
+                  :name="tool.name === 'fetch' ? 'i-lucide-file-text' : tool.name === 'search_slack' ? 'i-lucide-hash' : 'i-lucide-search'"
+                  class="size-4 flex-none self-center text-primary"
+                  :class="{ 'chat-pulse': !tool.done }"
+                />
+                {{ toolLabel(tool) }}
+              </li>
+            </ul>
+
+            <div
+              v-if="pair.answer.text"
+              class="chat-answer-body"
+              @click="onAnswerClick"
+              v-html="renderChatMarkdown(pair.answer.text, sourceUrls(pair.answer))"
             />
-          </li>
-        </ol>
-      </template>
-    </section>
+            <p v-else-if="pair.answer.status === 'streaming'" class="my-2 flex gap-1.5" role="status">
+              <span class="chat-pulse size-2 rounded-full bg-orange" />
+              <span class="chat-pulse size-2 rounded-full bg-orange [animation-delay:0.15s]" />
+              <span class="chat-pulse size-2 rounded-full bg-orange [animation-delay:0.3s]" />
+              <span class="sr-only">Korwell is thinking…</span>
+            </p>
+
+            <ol
+              v-if="pair.answer.status !== 'streaming' && citedSources(pair.answer).length"
+              class="mt-5 grid list-decimal gap-1.5 border-t border-default pt-4 pl-5 marker:font-semibold marker:text-primary"
+              aria-label="Sources"
+            >
+              <li v-for="source in citedSources(pair.answer)" :key="source.url" class="pl-1">
+                <NuxtLink v-if="source.url.startsWith('/')" class="text-link underline decoration-flame-300 underline-offset-[0.2em]" :to="source.url">{{ source.title }}</NuxtLink>
+                <a v-else class="text-link underline decoration-flame-300 underline-offset-[0.2em]" :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.title }}</a>
+                <span class="text-muted">
+                  {{ source.kind === 'slack' ? ' Slack' : ' Document' }}<template v-if="source.detail">, {{ source.detail }}</template>
+                </span>
+              </li>
+            </ol>
+
+            <p v-if="pair.answer.status === 'stopped'" class="mt-2 text-sm text-muted">Stopped.</p>
+            <ErrorState
+              v-if="pair.answer.status === 'error'"
+              :error="pair.answer.error"
+              title="Korwell couldn’t answer"
+              compact
+              v-bind="pair.last && !streaming ? { onRetry: retry } : {}"
+            />
+          </article>
+        </li>
+      </ol>
+      <div ref="end" class="h-px" />
+
+      <div class="studio-section sticky bottom-0 items-end bg-linear-to-b from-transparent to-paper to-[1.25rem] pt-6 pb-5">
+        <UButton class="hidden justify-self-start uppercase lg:inline-flex" color="neutral" variant="outline" size="sm" icon="i-lucide-plus" label="New chat" @click="newChat" />
+        <div class="flex items-end gap-2">
+          <UButton class="lg:hidden" color="neutral" variant="outline" icon="i-lucide-plus" square aria-label="New chat" title="New chat" @click="newChat" />
+          <ChatComposer
+            ref="composer"
+            v-model="draft"
+            class="max-w-3xl flex-1"
+            :streaming="streaming"
+            placeholder="Ask a follow-up…"
+            @submit="ask(draft)"
+            @stop="stop"
+          />
+        </div>
+      </div>
+    </template>
   </main>
 </template>

@@ -1,5 +1,5 @@
 import { useMutation, useQueryCache, type EntryKey } from '@pinia/colada'
-import { DOCUMENT_QUERY_KEYS, SEARCH_QUERY_KEYS, type DocumentPage } from '~/queries/documents'
+import { DOCUMENT_QUERY_KEYS, type DocumentPage } from '~/queries/documents'
 
 export interface NewDocument {
   title: string
@@ -18,10 +18,8 @@ export interface SavedDocument {
 }
 
 function invalidateLists (queryCache: ReturnType<typeof useQueryCache>) {
-  // Every cached page can shift, the author and uploader counts change, and
-  // cached search results may list a deleted document.
+  // Every cached page can shift, and the author and uploader counts change.
   return Promise.all([
-    queryCache.invalidateQueries({ key: SEARCH_QUERY_KEYS.root }),
     queryCache.invalidateQueries({ key: DOCUMENT_QUERY_KEYS.lists }),
     queryCache.invalidateQueries({ key: DOCUMENT_QUERY_KEYS.facets, exact: true })
   ])

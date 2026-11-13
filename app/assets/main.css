@@ -1,6 +1,17 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 
+/*
+ * Kaldi fonts, as on kaldi.si. The files are not in git (public/kaldi-fonts is
+ * ignored); without them the fallbacks in --font-sans and --font-serif are used.
+ */
+@font-face {
+  font-family: "Passenger Sans";
+  src: url("/kaldi-fonts/passenger-300.otf") format("opentype");
+  font-weight: 300;
+  font-display: swap;
+}
+
 @font-face {
   font-family: "Passenger Sans";
   src: url("/kaldi-fonts/passenger-400.otf") format("opentype");
@@ -11,7 +22,28 @@
 @font-face {
   font-family: "Passenger Sans";
   src: url("/kaldi-fonts/passenger-700.otf") format("opentype");
-  font-weight: 700;
+  font-weight: 600 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tiempos Headline";
+  src: url("/kaldi-fonts/tiempos-300.otf") format("opentype");
+  font-weight: 300;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tiempos Headline";
+  src: url("/kaldi-fonts/tiempos-400.otf") format("opentype");
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tiempos Headline";
+  src: url("/kaldi-fonts/tiempos-500.otf") format("opentype");
+  font-weight: 500;
   font-display: swap;
 }
 
@@ -23,10 +55,11 @@
 }
 
 /*
- * Kaldi design tokens for Tailwind. `kaldi` is the brown brand palette
- * (700 is the Kaldi brown, 900 the ink colour) and `rust` the warning red.
- * app.config.ts maps them to Nuxt UI's primary and error colours, so
- * `color="primary"` and classes like `text-primary` or `bg-kaldi-50` use them.
+ * Kaldi design tokens for Tailwind, taken from kaldi.si. `flame` is the Kaldi
+ * orange (500 is #fd4e1f), `kaldi` the brown (700 is the text colour, 900 the
+ * ink), and `rust` the error red. app.config.ts maps them to Nuxt UI's
+ * primary, neutral, and error colours. `link` is a darker orange for small
+ * text, where #fd4e1f on paper is too faint to read.
  */
 @theme static {
   --font-sans: "Passenger Sans", "Segoe UI", "Helvetica Neue", sans-serif;
@@ -34,6 +67,19 @@
 
   --color-paper: #f2f0ed;
   --color-orange: #fd4e1f;
+  --color-link: #c2361a;
+
+  --color-flame-50: #fff4f0;
+  --color-flame-100: #ffe4da;
+  --color-flame-200: #ffc5b1;
+  --color-flame-300: #ff9d7e;
+  --color-flame-400: #fe7149;
+  --color-flame-500: #fd4e1f;
+  --color-flame-600: #e03c10;
+  --color-flame-700: #c2361a;
+  --color-flame-800: #9a2b15;
+  --color-flame-900: #7a2514;
+  --color-flame-950: #421007;
 
   --color-kaldi-50: #f8f4ee;
   --color-kaldi-100: #efe5d6;
@@ -61,23 +107,26 @@
 }
 
 /*
- * Nuxt UI semantic colours, tuned to the Kaldi palette. The older names
- * (--paper, --accent, …) stay for the hand-drawn eye and Panem animations.
+ * Nuxt UI semantic colours, tuned to kaldi.si: brown text on paper, orange
+ * buttons. The older names (--paper, --accent, …) stay for the hand-drawn eye
+ * and Panem animations.
  */
 :root {
-  --ui-primary: var(--ui-color-primary-700);
+  --ui-primary: var(--ui-color-primary-500);
   --ui-error: var(--ui-color-error-600);
-  --ui-success: #1f6b3a;
-  --ui-text: var(--color-kaldi-900);
+  --ui-success: #40774f;
+  --ui-text: var(--color-kaldi-700);
   --ui-text-highlighted: var(--color-kaldi-900);
-  --ui-text-muted: #695944;
-  --ui-text-dimmed: #8a7a64;
+  --ui-text-muted: #7a6650;
+  --ui-text-dimmed: #a08f78;
+  --ui-text-inverted: var(--color-paper);
   --ui-bg: #fff;
   --ui-bg-muted: var(--color-paper);
   --ui-bg-elevated: var(--color-paper);
-  --ui-border: #d7cfc5;
-  --ui-border-accented: #c4b9ab;
-  --ui-radius: 0.375rem;
+  --ui-bg-accented: #e7e0d6;
+  --ui-border: #e1d9cf;
+  --ui-border-accented: #c9bba9;
+  --ui-radius: 0.5rem;
 
   --paper: var(--color-paper);
   --card: #fff;
@@ -93,16 +142,26 @@
 
 @layer base {
   body {
-    @apply min-h-screen bg-paper font-sans text-default;
+    @apply min-h-screen bg-paper font-sans font-light text-default;
   }
 
   h1, h2, h3 {
-    @apply font-serif font-semibold tracking-tight;
+    @apply font-serif font-medium tracking-tight text-default;
+  }
+
+  strong, b {
+    @apply font-semibold;
   }
 }
 
+/* The orange uppercase label above a heading, as on kaldi.si. */
 @utility eyebrow {
-  @apply font-sans text-xs font-bold uppercase tracking-[0.2em] text-primary;
+  @apply font-sans text-base font-normal uppercase text-primary;
+}
+
+/* Two columns as on kaldi.si: a heading on the left, content on the right. */
+@utility studio-section {
+  @apply grid gap-x-16 gap-y-5 px-[clamp(1rem,5vw,4.5rem)] py-12 lg:grid-cols-[17rem_minmax(0,1fr)];
 }
 
 /* Native date picker icon in the Kaldi brown. */
@@ -120,6 +179,14 @@ input[type="date"]::-webkit-calendar-picker-indicator {
     height: auto;
     margin: 0 auto 1.25rem;
     view-transition-name: archive-eye;
+  }
+
+  /* The small eye in the header logo. It stays put between pages, so it is
+     left out of the page eye's view transition. */
+  .archive-eye.logo-eye {
+    width: 3.75rem;
+    margin: 0;
+    view-transition-name: none;
   }
 }
 
@@ -160,16 +227,16 @@ input[type="date"]::-webkit-calendar-picker-indicator {
 }
 
 /* Chat answers are rendered markdown (v-html), so they are styled here. */
-.chat-answer-body { line-height: 1.55; overflow-wrap: anywhere; }
+.chat-answer-body { font-size: 1.125rem; line-height: 1.65; overflow-wrap: anywhere; }
 .chat-answer-body > :first-child { margin-top: 0; }
 .chat-answer-body > :last-child { margin-bottom: 0; }
 .chat-answer-body :is(p, ul, ol) { margin: 0 0 0.7rem; }
 .chat-answer-body :is(ul, ol) { padding-left: 1.3rem; display: grid; gap: 0.25rem; }
 .chat-answer-body ul { list-style: disc; }
 .chat-answer-body ol { list-style: decimal; }
-.chat-answer-body :is(h3, h4) { margin: 0.9rem 0 0.4rem; font-size: 1.05rem; }
-.chat-answer-body strong { font-weight: 700; }
-.chat-answer-body a { color: var(--ui-primary); font-weight: 700; text-decoration: underline; text-decoration-color: var(--color-orange); text-underline-offset: 0.2em; }
+.chat-answer-body :is(h3, h4) { margin: 1rem 0 0.4rem; font-size: 1.2rem; }
+.chat-answer-body strong { font-weight: 600; }
+.chat-answer-body a { color: var(--color-link); text-decoration: underline; text-decoration-color: var(--color-flame-300); text-underline-offset: 0.2em; }
 .chat-answer-body code { font-size: 0.88em; background: var(--color-paper); border-radius: 4px; padding: 0.05rem 0.3rem; }
 .chat-answer-body pre { background: var(--color-paper); border-radius: 10px; padding: 0.7rem; overflow-x: auto; }
 .chat-answer-body pre code { background: none; padding: 0; }

@@ -11,6 +11,8 @@ const FILE_MAX_BYTES = 10 * 1024 * 1024
 const ACCEPT = '.md,.markdown,.txt,.pdf,.docx,.xlsx,.xlsm,.xlsb,.xls,.csv,text/plain,text/markdown,application/pdf,text/csv'
 const ACCEPT_LABEL = '.md, .txt, .pdf, .docx, .xlsx, or .csv'
 
+useHead({ title: 'Add document' })
+
 const route = useRoute()
 const rewardsEnabled = import.meta.dev
 const panemDemo = computed(() => rewardsEnabled && route.query.panem === '1')
@@ -27,6 +29,14 @@ const eyeMotionStyle = computed(() => {
   const transform = travel.returning ? 'none' : `translate(${travel.x}px, ${travel.y}px) scale(${travel.scale})`
   return { transform, transitionDuration: travel.duration + 'ms' }
 })
+
+// Upload a file is the main way in; Paste text is the second tab.
+const mode = ref<'upload' | 'paste'>('upload')
+const modes = [
+  { label: 'Upload a file', value: 'upload', icon: 'i-lucide-upload' },
+  { label: 'Paste text', value: 'paste', icon: 'i-lucide-text' }
+]
+const FILE_TYPES = ['PDF', 'Word', 'Excel', 'CSV', 'Markdown', 'Text']
 
 const title = ref('')
 const author = ref('')
@@ -158,6 +168,8 @@ function onDragEnter (event: DragEvent) {
   if (!hasFiles(event)) return
   event.preventDefault()
   dragDepth.value++
+  // Show the drop area while a file is dragged over the page.
+  if (!uploadLocked.value) mode.value = 'upload'
 }
 
 function onDragOver (event: DragEvent) {
@@ -220,6 +232,10 @@ async function saveDocument () {
   if (uploadLocked.value) return
   saveMessage.value = ''
   fileError.value = ''
+  if (mode.value === 'upload' && !convertFile.value && !pickedFile.value) {
+    fileError.value = 'Choose a file first, or switch to Paste text.'
+    return
+  }
   try {
     const saved = await saveNewDocument(requestBody())
     if (leaving) return
@@ -239,31 +255,68 @@ async function saveDocument () {
 
 <template>
   <main class="relative isolate flex flex-col overflow-clip">
-    <div class="mx-auto w-[min(46rem,calc(100%-2rem))] pt-10 pb-6">
-      <div ref="feedEye" class="feed-heading">
+    <div class="mx-auto w-[min(44rem,calc(100%-2rem))] pt-12 pb-10">
+      <div ref="feedEye" class="feed-heading text-center">
         <ArchiveEye
-          class="mx-0 w-32"
+          class="w-44"
           :class="{ 'feed-eye-travelling': eyeTravel }"
           :style="eyeMotionStyle"
           :black-hole="eyeBlackHole"
         />
-        <PageHeading eyebrow="Records intake" title="Add a document" />
+        <h1 class="text-[clamp(2.2rem,5vw,2.9rem)] leading-tight font-light">Add a document</h1>
+        <p class="mx-auto mt-2 max-w-md text-lg text-muted">Once it’s saved, anyone can ask Korwell about it.</p>
       </div>
       <form
         ref="uploadForm"
-        class="grid gap-4 rounded-2xl bg-default p-4 shadow-xs ring ring-default transition-opacity duration-[1100ms] ease-in-out motion-reduce:transition-none sm:p-6"
+        class="mt-8 grid gap-5 rounded-[2rem] bg-paper/92 p-[clamp(1rem,4vw,2rem)] shadow-[0_0_0_1px_rgb(89_61_20/0.08),0_24px_60px_-30px_rgb(89_61_20/0.35)] backdrop-blur-sm transition-opacity duration-[1100ms] ease-in-out motion-reduce:transition-none"
         :class="{ 'opacity-0': formHidden }"
         :style="eyeTravel ? { transitionDuration: eyeTravel.duration + 'ms' } : undefined"
         :inert="formHidden"
         @submit.prevent="saveDocument"
       >
-        <UFormField label="Title" required>
-          <UInput v-model="title" name="title" maxlength="200" required placeholder="Runbook title" class="w-full" />
-        </UFormField>
-        <UFormField label="Author">
-          <UInput v-model="author" name="author" maxlength="200" placeholder="Optional" class="w-full" />
-        </UFormField>
-        <UFormField label="Body" :required="!convertFile">
+        <UTabs
+          v-model="mode"
+          :items="modes"
+          :content="false"
+          variant="link"
+          class="justify-self-center"
+          :ui="{ list: 'border-b-0', trigger: 'uppercase font-light text-base px-0 mx-3' }"
+        />
+
+        <label
+          v-show="mode === 'upload'"
+          class="relative grid cursor-pointer justify-items-center gap-2 rounded-[1.75rem] border-2 bg-default/85 px-6 py-10 text-center backdrop-blur-[2px] transition-colors focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary"
+          :class="dragging
+            ? 'border-solid border-orange bg-flame-50'
+            : pickedName
+              ? 'border-solid border-success'
+              : 'border-dashed border-accented hover:border-primary'"
+        >
+          <!-- Visually hidden but still focusable, so keyboard users can open the picker. -->
+          <input ref="fileInput" class="pointer-events-none absolute size-px opacity-0" type="file" :accept="ACCEPT" :disabled="uploadLocked" @change="onFile">
+          <UIcon :name="pickedName && !dragging ? 'i-lucide-file-check' : 'i-lucide-upload'" class="size-9" :class="pickedName && !dragging ? 'text-success' : 'text-primary'" />
+          <template v-if="dragging">
+            <strong class="font-serif text-2xl font-normal">{{ pickedName ? 'Drop to replace the file' : 'Drop to add this file' }}</strong>
+            <span class="text-muted">{{ ACCEPT_LABEL }}, up to 10 MB</span>
+          </template>
+          <template v-else-if="pickedName">
+            <strong class="font-serif text-2xl font-normal [overflow-wrap:anywhere] text-success">{{ pickedName }} added</strong>
+            <span class="max-w-md text-muted">
+              {{ pickedIsText ? 'Its text is under Paste text, where you can edit it.' : 'Korwell converts it to text when you save.' }}
+              <template v-if="encodingNote">{{ encodingNote }}</template>
+              Drop or click to choose a different file.
+            </span>
+          </template>
+          <template v-else>
+            <strong class="font-serif text-2xl font-normal">Drop a file here, or choose one</strong>
+            <span class="text-muted">Korwell converts it to text before saving. Up to 10 MB.</span>
+            <span class="mt-1 flex flex-wrap justify-center gap-1.5">
+              <UBadge v-for="type in FILE_TYPES" :key="type" color="neutral" variant="soft" size="sm" class="rounded-full uppercase" :label="type" />
+            </span>
+          </template>
+        </label>
+
+        <UFormField v-if="mode === 'paste'" label="Body" :required="!convertFile">
           <UTextarea
             v-model="body"
             name="body"
@@ -276,45 +329,28 @@ async function saveDocument () {
             :placeholder="convertFile ? `Text will be extracted from ${convertFile.name} on save` : 'Paste markdown or plain text'"
           />
         </UFormField>
-        <label
-          class="relative grid cursor-pointer justify-items-center gap-1 rounded-xl border-2 p-6 text-center transition-colors focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-primary"
-          :class="dragging
-            ? 'border-solid border-orange bg-orange/10'
-            : pickedName
-              ? 'border-solid border-success bg-success/5'
-              : 'border-dashed border-default hover:border-primary hover:bg-primary/5'"
-        >
-          <!-- Visually hidden but still focusable, so keyboard users can open the picker. -->
-          <input ref="fileInput" class="pointer-events-none absolute size-px opacity-0" type="file" :accept="ACCEPT" :disabled="uploadLocked" @change="onFile">
-          <UIcon :name="pickedName && !dragging ? 'i-lucide-file-check' : 'i-lucide-upload'" class="size-6" :class="pickedName && !dragging ? 'text-success' : 'text-primary'" />
-          <template v-if="dragging">
-            <strong>{{ pickedName ? 'Drop to replace the file' : 'Drop to add this file' }}</strong>
-            <span class="text-sm text-muted">{{ ACCEPT_LABEL }} · up to 10 MB</span>
-          </template>
-          <template v-else-if="pickedName">
-            <strong class="text-success">{{ pickedName }} added</strong>
-            <span class="text-sm text-muted">
-              {{ pickedIsText ? 'Its text is in the body above.' : 'It is converted to text when you save.' }}
-              <template v-if="encodingNote">{{ encodingNote }}</template>
-              Drop or click to choose a different file.
-            </span>
-          </template>
-          <template v-else>
-            <strong>Drag a file here, or click to choose</strong>
-            <span class="text-sm text-muted">{{ ACCEPT_LABEL }} · up to 10 MB</span>
-          </template>
-        </label>
-        <div class="flex flex-wrap items-center gap-2">
+
+        <div class="grid gap-4 sm:grid-cols-[1.4fr_1fr]">
+          <UFormField label="Title" required>
+            <UInput v-model="title" name="title" maxlength="200" required placeholder="Runbook title" size="lg" class="w-full" />
+          </UFormField>
+          <UFormField label="Author">
+            <UInput v-model="author" name="author" maxlength="200" placeholder="Optional" size="lg" class="w-full" />
+          </UFormField>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-center gap-2">
           <UButton
             type="submit"
-            size="lg"
+            size="xl"
+            class="px-7 uppercase"
             :loading="saving"
             :disabled="uploadLocked"
             :label="openingLibrary ? 'Opening Library…' : uploading ? (convertFile ? 'Converting and saving…' : 'Saving…') : 'Save document'"
           />
-          <UButton v-if="pickedName" color="neutral" variant="outline" size="lg" icon="i-lucide-x" label="Remove file" :disabled="uploadLocked" @click="clearFile" />
+          <UButton v-if="pickedName" color="neutral" variant="outline" size="xl" icon="i-lucide-x" label="Remove file" :disabled="uploadLocked" @click="clearFile" />
         </div>
-        <p v-if="saveMessage" class="m-0 text-success" role="status">{{ saveMessage }}</p>
+        <p v-if="saveMessage" class="m-0 text-center text-success" role="status">{{ saveMessage }}</p>
         <UAlert v-if="fileError" role="alert" color="error" variant="subtle" icon="i-lucide-file-x" :title="fileError" />
         <UAlert
           v-if="duplicate"
@@ -328,11 +364,11 @@ async function saveDocument () {
             { label: 'Dismiss', color: 'neutral', variant: 'link', size: 'sm', onClick: () => dismissSaveError() }
           ]"
           orientation="vertical"
-          :ui="{ title: 'font-bold text-error', description: 'text-default opacity-100' }"
+          :ui="{ title: 'font-semibold text-error', description: 'text-default opacity-100' }"
         >
           <template #description>
             It matches
-            <NuxtLink class="font-semibold text-primary underline" :to="documentPath(duplicate.id)">“{{ duplicate.title }}”</NuxtLink><template v-if="duplicateDate">, added {{ duplicateDate }}</template>.
+            <NuxtLink class="font-semibold text-link underline" :to="documentPath(duplicate.id)">“{{ duplicate.title }}”</NuxtLink><template v-if="duplicateDate">, added {{ duplicateDate }}</template>.
             Nothing was saved. Choose a different file, or open the existing one.
           </template>
         </UAlert>
@@ -374,7 +410,7 @@ async function saveDocument () {
 }
 
 /* Keep the heading readable while the eyes swarm behind it. */
-.feed-heading :deep(:is(h1, .eyebrow)) {
+.feed-heading :deep(:is(h1, p)) {
   -webkit-text-stroke: 0.2em var(--paper);
   paint-order: stroke fill;
 }

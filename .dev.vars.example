@@ -8,3 +8,6 @@ SITE_PASSWORD=
 # Optional Cloudflare Access assertion validation. Set both together.
 ACCESS_TEAM_DOMAIN=
 ACCESS_AUD=
+
+# Signs MCP OAuth tokens. At least 32 characters. Empty disables /mcp (503).
+MCP_SIGNING_KEY=

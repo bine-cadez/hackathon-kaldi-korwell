@@ -56,6 +56,7 @@ npm test
 | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | `OPENROUTER_API_KEY` | `.env` for `npm run dev`. `.dev.vars` for `wrangler dev`. Production: `npx wrangler secret put OPENROUTER_API_KEY` |
 | `SITE_PASSWORD`      | Optional. Empty = unlocked. Same files for local. Production: `npx wrangler secret put SITE_PASSWORD`             |
+| `MCP_SIGNING_KEY`    | Signs MCP OAuth tokens. At least 32 characters. Empty disables `/mcp`. Production: `npx wrangler secret put MCP_SIGNING_KEY` |
 
 Do not commit the key. Do not put it in `wrangler.jsonc`. Placeholders only live in `.env.example` and `.dev.vars.example`.
 
@@ -210,7 +211,7 @@ New vectors can take a few seconds to show up in search. Vectorize applies inser
 4. Insert the document and chunks into D1, including the embedding JSON on `chunks.embedding` (this is what local dev searches). Upsert vectors into Vectorize (id = chunk id, metadata = document id, title, chunk index), except in local dev unless `VECTORIZE_REMOTE=true`.
 5. `POST /api/search` with `{ "query", "topK"? }` embeds the query. Deployed Workers run `VECTORIZE.query` and join the hit ids back to D1. Local dev ranks the stored D1 embeddings with cosine similarity. Either way the response includes chunk text and the source title.
 
-Other routes: `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/documents/:id`, `GET /api/health`. With `SITE_PASSWORD` set, direct calls to the document and search routes return 401 before any embedding request. Health stays public. `POST /api/auth/login` checks the password and sets the cookie.
+Other routes: `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/documents/:id`, `GET /api/health`, and the MCP routes below. With `SITE_PASSWORD` set, direct calls to the document and search routes return 401 before any embedding request. Health stays public. `POST /api/auth/login` checks the password and sets the cookie.
 
 ## Layout
 
@@ -222,8 +223,9 @@ public/robots.txt       disallow every crawler
 public/_headers         X-Robots-Tag on static assets
 migrations/0001_init.sql
 server/api/             upload, list, search
-server/middleware/      X-Robots-Tag and the shared-password gate
-server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes
+server/routes/          MCP endpoint and OAuth authorize, token, register
+server/middleware/      X-Robots-Tag, the shared-password gate, OAuth discovery
+server/utils/           chunk, OpenRouter embeddings, D1/Vectorize writes, MCP tools
 app/pages/index.vue     paste/upload and search UI
 ```
 
@@ -256,3 +258,103 @@ cannot, and a signed-out visitor cannot call the document or search API. Then
 apply Access to production and previews and set each deployment's audience to
 the tag of the policy protecting it. Only retire `SITE_PASSWORD` after verifying
 the live gate. No database migration is required.
+
+## MCP for Claude and ChatGPT
+
+`POST /mcp` is a read-only [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports) endpoint on the same Worker. It does not add a D1 migration.
+
+| Tool | What it does |
+| --- | --- |
+| `search` | Semantic search. `query` is the argument ChatGPT sends. Optional `limit` (1–20, default 8), `from`, `to` (inclusive UTC `YYYY-MM-DD`), and `author`. A date or author can stand in for `query` once metadata search is deployed. Returns `{ "results": [{ "id", "title", "url" }] }` for ChatGPT deep research and company knowledge. |
+| `fetch` | Full document text for one `id` from `search`. Returns `{ "id", "title", "text", "url", "metadata" }`. |
+| `search_slack` | Omitted until the Slack archive is on `main` and this branch is rebased. See the comment in `server/utils/mcp-library.ts`. |
+
+`search` calls `searchDocuments`. On current `main` that function ignores the filters object. After rebasing onto metadata search (#6), the same call applies `from`, `to`, and `author` (the function moves to `server/utils/search.ts`; update the import if the export moves). Chunk hits are collapsed to one result per document. The citation URL is `https://<host>/library?document=<id>`.
+
+There are no write tools.
+
+### Why OAuth, not a shared bearer token
+
+Claude and ChatGPT connect from their own servers. They cannot complete the Cloudflare Access one-time PIN, and they cannot present the `site_auth` cookie. Claude's static request-header credential is a limited beta, and one shared bearer would not be tied to a person.
+
+The Worker is its own OAuth 2.1 authorization server (authorization code + S256 PKCE, dynamic client registration, refresh tokens). `@cloudflare/workers-oauth-provider` is not used: it would have to own the Worker fetch handler, and it needs a KV namespace this app does not have. Tokens are HS256 JWTs signed with `MCP_SIGNING_KEY`, so nothing new is stored in D1.
+
+Tradeoff: a token cannot be revoked before it expires, and an authorization code can be presented more than once until it expires. Codes last 2 minutes and are useless without the PKCE verifier. Access tokens last 1 hour. Refresh tokens last 30 days and rotate on use, but the previous refresh token stays valid until it expires. Set a new `MCP_SIGNING_KEY` to invalidate every outstanding token.
+
+Who may connect:
+
+1. The browser step `GET /authorize` stays behind Cloudflare Access (or `SITE_PASSWORD` when Access is off). Only a Kaldi email that passes Access, or someone who knows the site password, can approve a client.
+2. `/mcp` accepts only an access token from that approval. A missing or bad token is **401** with `WWW-Authenticate` pointing at the protected-resource metadata, which is what Claude and ChatGPT use to start sign-in.
+3. If `MCP_SIGNING_KEY` is unset or shorter than 32 characters, `/mcp`, `/token`, `/register`, and `/authorize` return **503**. They do not fall open.
+4. Redirect URIs are allowlisted: `https://claude.ai/api/mcp/auth_callback`, `https://chatgpt.com/connector_platform_oauth_redirect`, `https://chatgpt.com/connector/oauth/<id>`, and loopback `http://localhost` or `http://127.0.0.1` `/callback` (any port) for Claude Code. The consent page names the redirect host and warns on loopback.
+
+Discovery (no token):
+
+- `GET /.well-known/oauth-protected-resource`
+- `GET /.well-known/oauth-protected-resource/mcp`
+- `GET /.well-known/oauth-authorization-server`
+
+The issuer and the `authorization_servers` entry are the site origin with no trailing slash. `resource` is that origin plus `/mcp`. Authorization responses include `iss` (RFC 9207), so ChatGPT can use the stable redirect URI. Client ID metadata documents are not advertised; both clients use dynamic registration.
+
+### After merge
+
+Do this in order. The repo cannot change Cloudflare Access for you. Deploy does not upload this secret (`--keep-vars` leaves it in place once set). Do not put it in GitHub Actions.
+
+1. Generate a key and set it on the Worker (before opening the bypass, so a bypassed `/mcp` still returns 503):
+
+   ```bash
+   openssl rand -base64 32
+   npx wrangler secret put MCP_SIGNING_KEY
+   ```
+
+2. In Cloudflare Zero Trust, add a **second** self-hosted Access application. Keep the existing Allow policy (One-time PIN, `kaldi.si`) on the hostname-wide app. The new app is more specific, so it wins for these paths only. Copy the same hostnames the current app covers: `doc-library.binec.workers.dev` and the preview host `*-doc-library.binec.workers.dev`.
+
+   Paths (exact path, not a trailing `/*`, so the path itself matches; children inherit):
+
+   - `/mcp`
+   - `/.well-known`
+   - `/token`
+   - `/register`
+
+   One policy on that application:
+
+   | Action | Include |
+   | --- | --- |
+   | Bypass | Everyone |
+
+   Do **not** add `/authorize`. That URL must keep asking for the Kaldi one-time PIN. A bypassed `/authorize` would let anyone mint a token.
+
+3. Confirm the split:
+
+   ```bash
+   curl -sI https://doc-library.binec.workers.dev/mcp
+   curl -sI https://doc-library.binec.workers.dev/authorize
+   ```
+
+   `/mcp` should be **401** from the Worker, with `WWW-Authenticate: Bearer ... resource_metadata=...`, not the Access login HTML. `/authorize` should still be the Access login.
+
+4. `GET /api/health` includes `"mcp": true` when the key is long enough.
+
+### Connect Claude
+
+Custom connectors on claude.ai, Claude Desktop, and the Claude mobile apps all use the same callback.
+
+1. Open [Claude](https://claude.ai) → **Customize** → **Connectors** → **Add custom connector**.
+2. Server URL: `https://doc-library.binec.workers.dev/mcp` (no trailing slash).
+3. Leave the OAuth client fields empty so Claude uses dynamic client registration.
+4. Save. Claude opens `/authorize`. Sign in with the Kaldi one-time PIN if Access asks, then choose **Allow read access**.
+5. In a chat, ask Claude to search the Korwell library. It should call `search`, then `fetch`.
+
+Claude Code can use the same URL. Its redirect is `http://127.0.0.1:<port>/callback` or `http://localhost:<port>/callback`, which the consent page calls out before you allow it.
+
+### Connect ChatGPT
+
+ChatGPT developer mode and custom MCP connectors expect the tool names `search` and `fetch` and the result shapes above. Authentication is OAuth. The authorization server advertises `authorization_response_iss_parameter_supported`, so ChatGPT uses `https://chatgpt.com/connector_platform_oauth_redirect`. If the connector page shows a different redirect of the form `https://chatgpt.com/connector/oauth/<id>`, that form is allowlisted too.
+
+1. In ChatGPT, enable **Developer mode** (Settings → Apps / Connectors, depending on the workspace).
+2. Add a custom MCP server. Server URL: `https://doc-library.binec.workers.dev/mcp`.
+3. Choose **OAuth**. Do not paste a client secret. ChatGPT registers a public client.
+4. Approve the Access one-time PIN and the Korwell consent page when they open.
+5. In a conversation, attach the connector (or start deep research / company knowledge) and ask a question that is answered by a document in the library. ChatGPT calls `search`, then `fetch`, and cites the `url` on each result.
+
+A preview hostname (`https://pr-<number>-doc-library.binec.workers.dev/mcp`) uses the production signing key and the production database. The bypass app has to include that hostname or the preview stays behind Access and the connector cannot reach it. Do not use a preview to delete production documents.

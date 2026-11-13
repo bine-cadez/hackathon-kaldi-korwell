@@ -1,3 +1,5 @@
+import { isMcpMachineRoute } from './mcp-routes.ts'
+
 export const SITE_AUTH_COOKIE = 'site_auth'
 
 const SESSION_PREFIX = 'site-auth:v1:'
@@ -42,6 +44,8 @@ export function isPublicRoute (method: string, pathname: string): boolean {
   if ((verb === 'GET' || verb === 'HEAD') && (path === '/api/health' || path === '/favicon.ico' || path === '/korwell-eye.svg' || path === '/robots.txt')) {
     return true
   }
+  // MCP machine paths skip the shared password. /mcp still requires an OAuth token.
+  if (isMcpMachineRoute(verb, path)) return true
   return verb === 'POST' && path === '/api/auth/login'
 }
 

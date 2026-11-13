@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createApp, defineEventHandler, toWebHandler } from 'h3'
 import { afterEach, describe, test } from 'node:test'
 import login from '../server/api/auth/login.post.ts'
+import logout from '../server/api/auth/logout.post.ts'
 import sitePassword from '../server/middleware/site-password.ts'
 import {
   decideSiteAccess,
@@ -58,6 +59,7 @@ describe('site password HTTP gate', { concurrency: false }, () => {
   const handler = toWebHandler(createApp()
     .use(sitePassword)
     .use('/api/auth/login', login)
+    .use('/api/auth/logout', logout)
     .use(defineEventHandler(() => ({ reached: true }))))
 
   test('direct API calls without credentials get 401 and never reach the route', async () => {
@@ -157,6 +159,21 @@ describe('site password HTTP gate', { concurrency: false }, () => {
     }))
     assert.equal(secure.status, 200)
     assert.match(secure.headers.get('set-cookie') || '', /Secure/i)
+  })
+
+  test('logout expires the session cookie', async () => {
+    process.env.SITE_PASSWORD = 's3cret'
+    const token = await siteSessionToken('s3cret')
+    const response = await handler(new Request('http://library.test/api/auth/logout', {
+      method: 'POST',
+      headers: { cookie: `${SITE_AUTH_COOKIE}=${token}` }
+    }))
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), { ok: true, redirect: '/' })
+    const setCookie = response.headers.get('set-cookie') || ''
+    assert.match(setCookie, new RegExp(`^${SITE_AUTH_COOKIE}=;`))
+    assert.match(setCookie, /Max-Age=0/i)
+    assert.match(setCookie, /Path=\//)
   })
 
   test('Slack events skip the password and search stays locked', async () => {
